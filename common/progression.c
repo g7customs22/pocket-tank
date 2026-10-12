@@ -372,13 +372,19 @@ static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_
  * in, so there is always a pair to court (2026-09-24: the spawning needs
  * two fish in the grass; tank_add_fish already fell back to fish 0 and 1) */
 static float parent_rank(const fish_t *f) { return (f->stage >= STAGE_ADULT ? 100.0f : 0.0f) + f->trust; }
+enum { BREED_HUNGRY=1, BREED_TIRED=2, BREED_STRESSED=4 };
+static unsigned breed_care_blockers(const fish_t *f) {
+    return (f->hunger>4 ? BREED_HUNGRY : 0) |
+           (f->energy<4 ? BREED_TIRED : 0) |
+           (f->stress>3 ? BREED_STRESSED : 0);
+}
 bool progression_breed_pair(const tank_t *t,int *a,int *b){
     *a=*b=-1;
     if(t->n_fish>=POP_CAP||t->n_fish>=N_FISH_MAX)return false;
     for(int i=0;i<t->n_fish;i++)for(int j=i+1;j<t->n_fish;j++){
         const fish_t *x=&t->fish[i],*y=&t->fish[j];
         if(x->stage<STAGE_ADULT||y->stage<STAGE_ADULT||x->species!=y->species)continue;
-        if(x->hunger>4||y->hunger>4||x->stress>3||y->stress>3||x->energy<4||y->energy<4)continue;
+        if(breed_care_blockers(x)||breed_care_blockers(y))continue;
         if(!tank_species_allowed(t->habitat,x->species))continue;
         *a=i;*b=j;return true;
     }
@@ -506,6 +512,12 @@ static const char *const TIP_CHANGE[] = { "FISH PERSONALITIES WILL", "NATURALLY 
 static const char *const TIP_GRASS[]  = { "GRASS REGROWS ON ITS OWN,", "FASTEST WHILE THE TANK", "SLEEPS.", NULL };
 static const char *const TIP_GLASS[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };   /* Strato's words */
 const char *const *progression_fry_tip(int kind) {
+#ifdef POCKET_TANK_WIDE_V1
+    static const char *const care[]={"MATCHING ADULTS NEED:","HUNGER 4 OR LESS,", "ENERGY 4 OR MORE,", "STRESS 3 OR LESS.","KEEP COVER. ANY FAILED", "NEED RESETS THE 15 MIN.",NULL};
+    static const char *const rest[]={"AFTER A FRY, WAIT SIX", "HOURS IN THIS ACTIVE TANK.","OTHER TANKS AND OFFLINE", "TIME DO NOT COUNT.",NULL};
+    if(kind==FRY_REQ_GROW)return care;
+    if(kind==FRY_REQ_FEED)return rest;
+#endif
     switch (kind) {
     case FRY_REQ_TRUST:  return TIP_TRUST;
     case FRY_REQ_FEED:   return TIP_FEED;
@@ -519,6 +531,45 @@ const char *const *progression_fry_tip(int kind) {
 
 /* the checklist, in words. No %f: the device's printf may be the nano one. */
 static const char *const STAGE_WORDS[4] = { "A FRY", "A JUVENILE", "AN ADULT", "AN ELDER" };
+#ifdef POCKET_TANK_WIDE_V1
+static void care_line(char *out,size_t n,const fish_t *f) {
+    const char *reason="NEEDS TO GROW";
+    static const char *const reasons[]={"READY","HUNGRY","TIRED","HUNGRY/TIRED",
+        "STRESSED","HUNGRY/STRESSED","TIRED/STRESSED","HUNGRY/TIRED/TENSE"};
+    if(f->stage>=STAGE_ADULT)reason=reasons[breed_care_blockers(f)];
+    int names=25-2-(int)strlen(reason);
+    snprintf(out,n,"%.*s: %s",names,f->name[0]?f->name:"FISH",reason);
+}
+/* Describe the closest legal same-species pair using the same care predicates
+ * as breeding. Do not blame an unhealthy fish when another pair qualifies. */
+static void pair_care_words(const tank_t *t,fry_req_t *r,bool pair) {
+    if(pair) {
+        if(s_breed_cool>0)snprintf(r->words2,sizeof r->words2,"WAIT FOR REST COOLDOWN");
+        else if(tank_nursery_bed(t)<0)snprintf(r->words2,sizeof r->words2,"WAIT FOR NURSERY COVER");
+        return;
+    }
+    int best_a=-1,best_b=-1,best_score=1000;bool matching=false;
+    for(int i=0;i<t->n_fish;i++)for(int j=i+1;j<t->n_fish;j++) {
+        const fish_t *x=&t->fish[i],*y=&t->fish[j];
+        if(x->species!=y->species)continue;
+        matching=true;if(!tank_species_allowed(t->habitat,x->species))continue;
+        unsigned bx=breed_care_blockers(x),by=breed_care_blockers(y);
+        int score=16*((x->stage<STAGE_ADULT)+(y->stage<STAGE_ADULT));
+        for(unsigned bit=1;bit<=BREED_STRESSED;bit<<=1)score+=!!(bx&bit)+!!(by&bit);
+        if(score<best_score){best_score=score;best_a=i;best_b=j;}
+    }
+    if(best_a<0) {
+        snprintf(r->words,sizeof r->words,"%s",matching?"PAIR NOT FOR THIS TANK":"NEED TWO MATCHING SPECIES");
+        snprintf(r->words2,sizeof r->words2,"BOTH MUST BE ADULTS");return;
+    }
+    const fish_t *a=&t->fish[best_a],*b=&t->fish[best_b];
+    bool bad_a=a->stage<STAGE_ADULT||breed_care_blockers(a);
+    bool bad_b=b->stage<STAGE_ADULT||breed_care_blockers(b);
+    care_line(r->words,sizeof r->words,bad_a?a:b);
+    if(bad_a&&bad_b)care_line(r->words2,sizeof r->words2,b);
+    else snprintf(r->words2,sizeof r->words2,"15 MIN CONTINUOUS CARE");
+}
+#endif
 int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *staged) {
     if (staged) *staged = s_arrival_pending;
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 2) return 0;
@@ -540,8 +591,12 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
     out[1].met=tank_nursery_bed(t)>=0;
     out[1].frac=out[1].met?1:best/VEG_NURSERY;out[1].kind=FRY_REQ_GRASS;
     out[2].met=s_breed_cool<=0;out[2].frac=1-s_breed_cool/BREED_COOLDOWN_S;out[2].kind=FRY_REQ_FEED;
-    if(pair) snprintf(out[0].progress,sizeof out[0].progress,"%d / 15 MIN",(int)s_breed_ready/60);
-    else snprintf(out[0].progress,sizeof out[0].progress,"PAIR NOT READY");
+    pair_care_words(t,&out[0],pair);
+    int care_minutes=(int)s_breed_ready/60;
+    if(care_minutes<0)care_minutes=0;
+    if(care_minutes>15)care_minutes=15;
+    snprintf(out[0].progress,sizeof out[0].progress,"%d / 15 MIN%s",care_minutes,
+             pair&&s_breed_cool<=0&&out[1].met?"":" - BLOCKED");
     if(out[1].met) snprintf(out[1].progress,sizeof out[1].progress,"A NURSERY BED IS READY");
     else snprintf(out[1].progress,sizeof out[1].progress,"TALLEST BED %d%% THERE",(int)(out[1].frac*100+0.5f));
     snprintf(out[2].progress,sizeof out[2].progress,"%d MIN REMAIN",(int)(s_breed_cool+59)/60);

@@ -1926,9 +1926,12 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
      * Effective cadence therefore scales with how much is
      * happening, not with how many fish live here. The start index rotates
      * so no slot is structurally favoured when several fish ask at once. */
-    if (advise && t->n_fish > 0) {
+    if (t->n_fish > 0) {
+        /* Requests update ask_rr; keep this traversal's origin fixed so one
+         * fish cannot be visited twice while another misses its recovery. */
+        int ask_start = t->ask_rr;
         for (int k = 0; k < t->n_fish; k++) {
-            int i = (t->ask_rr + k) % t->n_fish;
+            int i = (ask_start + k) % t->n_fish;
             fish_t *f = &t->fish[i];
             uint32_t sig = state_signature(t, i);
             /* prototype's urgent path: starving with food in view gets
@@ -1938,8 +1941,18 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
             bool changed = sig != f->sig && f->ask_age > ADVISOR_MIN_INTERVAL;
             bool idle = f->ask_age > ADVISOR_IDLE_CEILING;
             bool want = changed || idle || (urgent && f->ask_age > 0.5f);
-            goal_t g = advise(t, i, want);
-            if (want) {            /* async advisors queue it; rules answer now */
+            goal_t g = advise ? advise(t, i, want) : f->goal;
+#ifdef POCKET_TANK_WIDE_V1
+            /* Recovery is a reflex, after polling so stale async answers are
+             * consumed but cannot interrupt it. The existing REST goal is the
+             * latch: no new persisted fields or cross-tank global state.
+             * Exhaustion enters at 1.5; REST continues until energy reaches 6.
+             * This also lets a naturally chosen rest finish before changing
+             * pastime. The model resumes ownership once recovery completes. */
+            if (f->energy <= 1.5f || (f->goal.id == GOAL_REST && f->energy < 6.0f))
+                g = (goal_t){ GOAL_REST, 7, 1.0f, GOAL_COUNT };
+#endif
+            if (advise && want) {  /* async advisors queue it; rules answer now */
                 f->sig = sig; f->ask_age = 0; t->advisor_asks++;
                 t->ask_rr = (i + 1) % t->n_fish;
             }

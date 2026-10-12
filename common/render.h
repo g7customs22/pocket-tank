@@ -231,6 +231,8 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
 /* the same, but AS THE FISH IS: its own stage (a fry shows no markings yet,
  * an elder its long tail), calm and fed - the birth flow's portrait */
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float clock);
+/* Same species/stage outline, with every painted pixel in one locked ink. */
+void render_fish_silhouette(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float clock, uint32_t ink);
 
 /* Preferred top edge for reading an open information panel; -1 if closed. */
 int render_milestones_focus(void);
