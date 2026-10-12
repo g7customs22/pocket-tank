@@ -1,3 +1,6 @@
+#ifdef POCKET_WORLD_PROTO
+#include "world_proto.h"
+#endif
 /* advisor_core.c — see advisor_core.h. */
 #include "advisor_core.h"
 #include "word_tok.h"
@@ -55,7 +58,11 @@ void advisor_core_encode(const tank_t *t, int idx, char *out, size_t n) {
     if (strcmp(frs, "none") == 0) snprintf(friend_s, sizeof friend_s, "none");
     else if (g_schema >= 3) snprintf(friend_s, sizeof friend_s, "%s", frs);            /* v3: no names */
     else snprintf(friend_s, sizeof friend_s, "%s %s", t->fish[fr].model_name, frs);
-    sighting(f, t->bubble_x, t->bubble_y, true, bubble_s, sizeof bubble_s);
+    float bx=t->bubble_x,by=t->bubble_y;
+#ifdef POCKET_WORLD_PROTO
+    wp_bubble((tank_t *)t,idx,&bx,&by,false);
+#endif
+    sighting(f,bx,by,true,bubble_s,sizeof bubble_s);
     sighting(f, t->reef_x, t->reef_y, true, reef_s, sizeof reef_s);
 
     /* wall: nearest side, world-frame contact point, heading-relative clock */

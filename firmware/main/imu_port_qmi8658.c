@@ -28,7 +28,11 @@
 #define REG_AX_L           0x35
 #define WHO_AM_I_VAL       0x05
 
-#define POLL_INTERVAL_US   250000
+#ifdef POCKET_WORLD_PROTO
+#define POLL_INTERVAL_US 32000 /* existing 31.25Hz accel; gyro remains off */
+#else
+#define POLL_INTERVAL_US 250000
+#endif
 /* 2026-08-31: was 8192 (0.5 g) - that only fired within ~60 deg of vertical,
  * so a device reclined on its back (bench pose: up-axis carries ~0.25 g)
  * never flipped. Now ~0.21 g, but the up-axis must also DOMINATE the other
@@ -45,7 +49,8 @@ static const char *TAG = "imu";
 static i2c_master_dev_handle_t s_dev;
 static bool s_inverted;
 static int s_streak;              /* consecutive polls voting for a flip */
-static int64_t s_next_us;
+static int64_t s_next_us,s_sample_us,s_legacy_next;
+static int16_t s_sample[3];static bool s_sample_valid;
 static int16_t s_prev[3]; static bool s_have_prev;
 static int64_t s_moved_us; static int s_motion; static int16_t s_last[3];
 static int64_t s_handled_us; static bool s_prev_moved;   /* two polls in a row over the threshold */
@@ -101,10 +106,15 @@ void imu_port_poll(int64_t now_us) {
     if (!s_dev || now_us < s_next_us) return;
     s_next_us = now_us + POLL_INTERVAL_US;
     uint8_t raw[6];
-    if (!rdn(REG_AX_L, raw, 6)) return;
+    if (!rdn(REG_AX_L, raw, 6)) {s_sample_valid=false;return;}
     int16_t a[3] = { (int16_t)(raw[0] | raw[1] << 8),
                      (int16_t)(raw[2] | raw[3] << 8),
                      (int16_t)(raw[4] | raw[5] << 8) };
+    for(int i=0;i<3;i++)s_sample[i]=a[i];
+    s_sample_us=now_us;s_sample_valid=true;
+    /* Legacy flip/motion thresholds retain their original 250ms cadence. */
+    if(now_us<s_legacy_next)return;
+    s_legacy_next=now_us+250000;
     static int logged;
     if (logged < 3) { logged++; ESP_LOGI(TAG, "g=[%d %d %d] inverted=%d", a[0], a[1], a[2], (int)s_inverted); }
     /* handling: movement since the last poll, railed channels ignored */
@@ -159,6 +169,7 @@ void imu_port_poll(int64_t now_us) {
     }
 }
 
+bool imu_port_accel_sample(int16_t out[3],int64_t *sample_us){for(int i=0;i<3;i++)out[i]=s_sample[i];if(sample_us)*sample_us=s_sample_us;return s_dev&&s_sample_valid;}
 bool imu_port_inverted(void) { return s_inverted; }
 void imu_port_last(int16_t out[3], int *motion) { for (int i = 0; i < 3; i++) out[i] = s_last[i]; if (motion) *motion = s_motion; }
 bool imu_port_handled(void) { return s_handled_us && esp_timer_get_time() - s_handled_us < IMU_MOTION_HOLD_US; }
@@ -169,9 +180,11 @@ int  imu_port_motion(void) { return s_motion; }
  * the neighbouring rails cycle. Wake: never trust what the chip did in the
  * dark - full soft reset + reconfigure. */
 void imu_port_sleep(void) {
+    s_sample_valid=false;
     if (s_dev) (void)wr8(REG_CTRL7, 0x00);
 }
 void imu_port_wake(void) {
+    s_sample_valid=false;s_next_us=s_legacy_next=0;
     if (!s_dev) return;
     if (!imu_reset_config()) ESP_LOGW(TAG, "wake reconfig failed");
 }

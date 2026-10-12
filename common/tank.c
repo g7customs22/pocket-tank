@@ -1,3 +1,6 @@
+#ifdef POCKET_WORLD_PROTO
+#include "world_proto.h"
+#endif
 /* tank.c — reflex layer. See tank.h. Faithful port of the browser prototype's
  * updateFish/targetForGoal/wall handling, with prototype px values scaled by
  * ~0.55 for the 448-wide tank. */
@@ -1381,13 +1384,18 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
         tg.speed = lerpf(51, 83, f->bold);
         break;
     }
-    case GOAL_VISIT_BUBBLES:
+    case GOAL_VISIT_BUBBLES: {
+        float bubble_x=t->bubble_x,bubble_y=t->bubble_y-74;
+#ifdef POCKET_WORLD_PROTO
+        wp_bubble(t,idx,&bubble_x,&bubble_y,!glance);
+#endif
         /* each visitor keeps its own lane: a per-fish phase and radius, so
          * four fish orbit the column instead of stacking on one point */
-        tg.x = t->bubble_x + sinf(tm * 1.2f + f->wander + idx * 1.9f) * (26 + idx * 6);
-        tg.y = t->bubble_y - 74 + cosf(tm * 0.8f + f->wander + idx * 1.3f) * (34 + idx * 6);
+        tg.x = bubble_x + sinf(tm * 1.2f + f->wander + idx * 1.9f) * (26 + idx * 6);
+        tg.y = bubble_y + cosf(tm * 0.8f + f->wander + idx * 1.3f) * (34 + idx * 6);
         tg.speed = 23;
         break;
+    }
     case GOAL_FOLLOW_FRIEND: {
         float d; int i = tank_nearest_friend(t, idx, &d);
         if (i >= 0) {
@@ -1509,6 +1517,9 @@ static void update_fish(tank_t *t, int idx, float dt) {
         if (f->goal.id == GOAL_VISIT_BUBBLES || f->goal.id == GOAL_INSPECT_REEF) {
             bool bub = f->goal.id == GOAL_VISIT_BUBBLES;
             float sx = bub ? t->bubble_x : t->reef_x, sy = bub ? t->bubble_y - 74 : t->reef_y - 35;
+#ifdef POCKET_WORLD_PROTO
+            if(bub)wp_bubble(t,idx,&sx,&sy,true);
+#endif
             bool at = tank_dist(f->x, f->y, sx, sy) < CURIOSITY_SPEND_RADIUS;
             if (at) dc = -CURIOSITY_SPEND_PER_S;
             if (bub && at && !f->at_bubbles) tank_emit(TEV_BUBBLES, idx);   /* arrival at the column: the play cue */
@@ -2033,3 +2044,7 @@ void tank_habitat_defaults(tank_t *t,int habitat) {
         tank_decor_set(t,item,TANK_W*(.2f+.3f*k),DECOR_Z_BACK);
     }
 }
+
+#ifdef POCKET_WORLD_PROTO
+void tank_proto_wipe(tank_t *t,float x0,float y0,float x1,float y1){wipe_algae(t,x0,y0,x1,y1);}
+#endif

@@ -1,3 +1,6 @@
+#ifdef POCKET_WORLD_PROTO
+#include "world_proto.h"
+#endif
 #include "progression.h"
 #include "version.h"
 #include <stddef.h>
@@ -966,7 +969,11 @@ void progression_tick(tank_t *t, float dt) {
 
         /* milestones: firsts the fish chose to do */
         if (f->goal.id == GOAL_DART_PLAY && f->goal_age > 1.0f) set_ms(f, MS_FIRST_DART);
-        if (f->goal.id == GOAL_VISIT_BUBBLES && tank_dist(f->x, f->y, t->bubble_x, t->bubble_y) < 90) set_ms(f, MS_FIRST_BUBBLES);
+        float bx=t->bubble_x,by=t->bubble_y;
+#ifdef POCKET_WORLD_PROTO
+        wp_bubble(t,i,&bx,&by,true);
+#endif
+        if (f->goal.id == GOAL_VISIT_BUBBLES && tank_dist(f->x, f->y, bx,by) < 90) set_ms(f, MS_FIRST_BUBBLES);
         if (f->goal.id == GOAL_INSPECT_REEF && tank_dist(f->x, f->y, t->reef_x, t->reef_y) < 90) set_ms(f, MS_FIRST_REEF);
         if (f->goal.id == GOAL_FOLLOW_FRIEND && f->goal_age > 2.0f) set_ms(f, MS_FIRST_FOLLOW);
         if (f->goal.id == GOAL_DART_PLAY) n_dart++;

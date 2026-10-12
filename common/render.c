@@ -3561,3 +3561,7 @@ int render_shop_focus(void) {
     if (g_shp_earn) return SHP_EARN_MODAL_Y;
     return g_shp_modal >= 0 ? SHP_MODAL_Y + 80 : -1;
 }
+
+#ifdef POCKET_WORLD_PROTO
+#include "world_proto_render.inc"
+#endif
