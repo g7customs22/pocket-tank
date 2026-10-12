@@ -10,7 +10,8 @@ typedef struct {
     bool armed, down, releasing, consumed, pending, second;
     int64_t press_at, release_at, single_at;
 } boot349_button_t;
-/* Window is first release to second press, inclusive. A second short press
+/* Single = light power; long = controls visibility; double = White/UV.
+ * Window is first release to second press, inclusive. A second short press
  * may finish after the window. Stable release 30ms; minimum press 50ms.
  * Call for every timestamped edge and once at the current time, in order. */
 static inline int boot349_poll(boot349_button_t *s,int64_t now,bool down,bool fresh_touch,bool confirm,bool setup) {
@@ -23,20 +24,20 @@ static inline int boot349_poll(boot349_button_t *s,int64_t now,bool down,bool fr
         int64_t duration=s->release_at-s->press_at;
         bool valid=!s->consumed&&duration>=50000;
         s->down=false;s->releasing=false;
-        if(valid&&duration>=BOOT349_LONG_US){s->pending=false;action=BOOT349_LIGHT;}
+        if(valid&&duration>=BOOT349_LONG_US){s->pending=false;action=BOOT349_PAGES;}
         else if(valid){
             if(s->second){s->pending=false;action=BOOT349_STYLE;}
             else {s->pending=true;s->single_at=s->release_at+BOOT349_DOUBLE_US;}
         }
     }
     if(!s->down&&s->pending&&(now>s->single_at||(!down&&now==s->single_at))){
-        s->pending=false;action=BOOT349_PAGES;
+        s->pending=false;action=BOOT349_LIGHT;
     }
     if(down){
         if(!s->down){s->down=true;s->press_at=now;s->consumed=confirm||setup;s->second=s->pending;}
         s->releasing=false;
         if(!s->consumed&&fresh_touch){s->consumed=true;s->pending=false;return BOOT349_RESET;}
-        if(!s->consumed&&now-s->press_at>=BOOT349_LONG_US){s->consumed=true;s->pending=false;return BOOT349_LIGHT;}
+        if(!s->consumed&&now-s->press_at>=BOOT349_LONG_US){s->consumed=true;s->pending=false;return BOOT349_PAGES;}
     }else if(s->down&&!s->releasing){s->releasing=true;s->release_at=now;}
     return action;
 }

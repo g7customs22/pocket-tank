@@ -1,3 +1,5 @@
+Final approved mapping: single toggles aquarium light power after the 500 ms double window; long (700 ms) shows/hides controls and selectors; double toggles White/UV without changing power. Short-then-long triggers controls only. From clean aquarium, long reveals the direct selectors. Remembered pages restore normally.
+
 # Landscape usability review
 
 Isolated production renderer/compositor at 640x172, with synthetic tanks. No device
@@ -43,10 +45,10 @@ interactive hardware session or an assessment of real capacitive-touch sensitivi
 ## Approved button change
 
 Physical BOOT/GPIO0 was the existing light key. PWR remains sleep/power.
-A short release now hides/restores controls and page/card including modal and
-scroll after a 500ms double-press window. Double press switches White/UV style.
+A long press now hides/restores controls and page/card including modal and
+scroll at 700ms. Double press switches White/UV style.
 Release debounce is 30ms and minimum press is 50ms; style can change while off.
-Long at 700ms toggles light once. Clean view starts unobstructed and maps every
+Single release toggles light once after the 500ms double-press window. Clean view starts unobstructed and maps every
 pixel of the full 640x172 panel into the aquarium, without hidden control hitboxes.
 Fish taps and decoration holds stay in the aquarium while clean view is active. Chord/reset and
 protected pages cancel singles; boot-held keys and bounce do not act. There is no

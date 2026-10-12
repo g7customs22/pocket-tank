@@ -1,7 +1,9 @@
+Final approved mapping: single toggles aquarium light power after the 500 ms double window; long (700 ms) shows/hides controls and selectors; double toggles White/UV without changing power. Short-then-long triggers controls only. From clean aquarium, long reveals the direct selectors. Remembered pages restore normally.
+
 # White and UV lighting
 
-BOOT/GPIO0: single short press hides/restores controls; double press selects
-White/UV; hold 700 ms toggles light power. Singles wait for a 500 ms double-press
+BOOT/GPIO0: single short press toggles light power; double press selects
+White/UV; hold 700 ms shows/hides controls. Singles wait for a 500 ms double-press
 window after release. Minimum press 50 ms, release debounce 30 ms. Double while
 off changes the remembered style without turning on. Short-then-long produces
 only the power action. PWR remains sleep/power; protected pages and the existing

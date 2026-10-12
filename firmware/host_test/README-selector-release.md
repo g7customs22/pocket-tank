@@ -1,3 +1,5 @@
+Final approved mapping: single toggles aquarium light power after the 500 ms double window; long (700 ms) shows/hides controls and selectors; double toggles White/UV without changing power. Short-then-long triggers controls only. From clean aquarium, long reveals the direct selectors. Remembered pages restore normally.
+
 # Direct selector + BOOT timing release
 
 Approved by user `proceed` after the three-button preview; app-only deployment authorized. Based on deployed74d3237 and button hotfixc38c0c1. No save layout/version change.

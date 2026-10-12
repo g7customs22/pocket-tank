@@ -1,3 +1,5 @@
+Final approved mapping: single toggles aquarium light power after the 500 ms double window; long (700 ms) shows/hides controls and selectors; double toggles White/UV without changing power. Short-then-long triggers controls only. From clean aquarium, long reveals the direct selectors. Remembered pages restore normally.
+
 # Care feedback and species portrait regression
 
 `care_ui_host.c` compiles the production renderer directly into the test so
@@ -62,18 +64,18 @@ reward paths/labels/repeated ticks/overflow, and unchanged manual/refund credits
 `usability_host.c` exercises the production native 640x172 compositor using isolated
 states, writes screenshots, and checks navigation and species/tank picker targets.
 
-Physical BOOT/GPIO0 light key (separate from the power key): short press hides or
+Physical BOOT/GPIO0 light key (separate from the power key): long press hides or
 restores the current page/card, retaining renderer modal and native scroll/picker
-state. From plain aquarium with no remembered page it opens MENU. A captured touch,
+state. From plain aquarium with no remembered page it reveals selectors. A captured touch,
 setup or reset confirmation prevents toggling. New navigation/dismissal discards
 remembered page state; tank switching cannot restore a previous tank's card.
-Long hold at 700ms toggles aquarium lighting once. Short release acts after only
+Single press toggles aquarium lighting once. Short release acts after only
 30ms switch debounce and a 500ms double-press window. Double press changes
 White/UV style, including while off; long hold retains that style. Clean view
 starts with all controls hidden; the entire 640x172 area shows aquarium pixels and
 routes touches to aquarium interactions, including areas formerly under buttons.
-Fish taps and decoration holds do not reopen panels in clean view. A short press
-restores controls and any remembered page/card, or opens MENU if none was stored. Existing BOOT-plus-touch reset prompt
+Fish taps and decoration holds do not reopen panels in clean view. A long press
+restores controls and any remembered page/card, or reveals selectors if none was stored. Existing BOOT-plus-touch reset prompt
 is preserved and consumes the gesture. Boot-held keys are ignored until released.
 `button_gestures_host.c` tests the production classifier. The workspace QA fixture
 extracts the production visibility function and verifies hide/restore/protection.

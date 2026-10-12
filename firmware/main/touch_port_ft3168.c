@@ -385,7 +385,7 @@ void touch_port_toggle_pages(void){
         s_sel_us=s_bat_us=esp_timer_get_time();g_ui349.view=s_hidden.view;g_ui349.scroll=s_hidden.scroll;
         g_ui349.species_picker=s_hidden.species;g_ui349.slots_picker=s_hidden.slots;
         g_ui349.habitat_picker=s_hidden.habitat;g_ui349.species_page=s_hidden.species_page;s_hidden.valid=false;
-    }else {g_ui349.controls_hidden=false;s_ms=true;}
+    }else {g_ui349.controls_hidden=false;s_ms=false;}
     g_ui349.owner=0;s_back=false;s_held_page=false;
 }
 int touch_port_take_slot(void){int s=s_slot_request;s_slot_request=-1;return s;}

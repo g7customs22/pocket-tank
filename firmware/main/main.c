@@ -356,12 +356,13 @@ static void boot349_dispatch(int64_t now,bool down){
         ESP_LOGI(TAG,"BOOT + tap: reset prompt");touch_port_confirm_open();
     }else if(action==BOOT349_PAGES){
         touch_port_toggle_pages();
+        ESP_LOGI(TAG,"BOOT long: controls %s",g_ui349.controls_hidden?"hidden":"shown");
     }else if(action==BOOT349_STYLE){
         boot349_toggle_style(&tank);progression_settings_changed();
         ESP_LOGI(TAG,"BOOT double: %s style",tank.uv.style?"UV":"WHITE");
     }else if(action==BOOT349_LIGHT){
         boot349_toggle_light(&tank);progression_settings_changed();
-        ESP_LOGI(TAG,"BOOT: aquarium light %s (MANUAL)",tank.light_manual_off?"off":"on");
+        ESP_LOGI(TAG,"BOOT single: aquarium light %s (MANUAL)",tank.light_manual_off?"off":"on");
     }
 }
 #endif

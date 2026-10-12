@@ -1,3 +1,5 @@
+Final approved mapping: single toggles aquarium light power after the 500 ms double window; long (700 ms) shows/hides controls and selectors; double toggles White/UV without changing power. Short-then-long triggers controls only. From clean aquarium, long reveals the direct selectors. Remembered pages restore normally.
+
 # BOOT double-press hotfix (not flashed)
 
 Base: deployed `74d3237`. Branch: `fix/forgiving-double-press`.
