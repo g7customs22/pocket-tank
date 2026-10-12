@@ -68,7 +68,7 @@ state. From plain aquarium with no remembered page it opens MENU. A captured tou
 setup or reset confirmation prevents toggling. New navigation/dismissal discards
 remembered page state; tank switching cannot restore a previous tank's card.
 Long hold at 700ms toggles aquarium lighting once. Short release acts after only
-30ms switch debounce and a 350ms double-press window. Double press changes
+30ms switch debounce and a 500ms double-press window. Double press changes
 White/UV style, including while off; long hold retains that style. Clean view
 starts with all controls hidden; the entire 640x172 area shows aquarium pixels and
 routes touches to aquarium interactions, including areas formerly under buttons.

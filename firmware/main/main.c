@@ -111,6 +111,23 @@ static bat_t s_bh;                          /* the battery page's history: NVS "
 static void bat_hist_save(void);            /* at sleep too: the screen-on time so far */
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 static boot349_button_t s_boot349;
+static boot349_capture_t s_boot_capture;
+static portMUX_TYPE s_boot_mux=portMUX_INITIALIZER_UNLOCKED;
+static bool s_boot_capture_active, s_boot_replay_down;
+static void boot349_sample(void *arg){
+    (void)arg;
+    portENTER_CRITICAL(&s_boot_mux);
+    if(s_boot_capture_active)boot349_capture(&s_boot_capture,esp_timer_get_time(),!gpio_get_level(BTN_SLEEP));
+    portEXIT_CRITICAL(&s_boot_mux);
+}
+static void boot349_capture_enable(bool active){
+    portENTER_CRITICAL(&s_boot_mux);
+    s_boot_capture=(boot349_capture_t){.raw_down=!gpio_get_level(BTN_SLEEP)};
+    s_boot_replay_down=s_boot_capture.raw_down;
+    s_boot349=(boot349_button_t){.armed=!s_boot_replay_down};
+    s_boot_capture_active=active;
+    portEXIT_CRITICAL(&s_boot_mux);
+}
 #else
 static bool s_btn_armed; static int64_t s_btn_low_since;   /* sleep_button_poll state */
 static bool s_btn_used;   /* this press opened the reset prompt: no drowse, no power-off from it */
@@ -182,6 +199,9 @@ static int restore_fish(void) {
     return n;
 }
 static void enter_sleep_for(int wake_after_s) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    boot349_capture_enable(false);
+#endif
     int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
     int64_t grace_us = wake_after_s > 0 ? DIRECTOR_GRACE_US : SLEEP_GRACE_US;
     ESP_LOGI(TAG, "sleep: save, panel off, %d s grace then %s | battery %d%% %d mV",
@@ -247,7 +267,7 @@ static void enter_sleep_for(int wake_after_s) {
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "nap");
         s_snap_n = 0;
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
-        memset(&s_boot349,0,sizeof s_boot349); /* wake press must be released before light control */
+        boot349_capture_enable(true); /* discard wake gesture and sleep-time edges */
 #else
         s_btn_armed = false; s_btn_low_since = 0;   /* require a fresh press */
 #endif
@@ -328,10 +348,9 @@ static void pwr_key_poll(int64_t now) {
  * count. With no PMIC (so no PWR key) a short press, at RELEASE, is the sleep
  * key as it was until 2026-09-16; a chord press never is. */
 #define BTN_DEBOUNCE_US 50000
-static void sleep_button_poll(int64_t now) {
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
-    bool down=!gpio_get_level(BTN_SLEEP);
-    bool fresh=s_boot349.down && touch_port_pressed_since(s_boot349.press_at);
+static void boot349_dispatch(int64_t now,bool down){
+    bool fresh=s_boot349.down && !s_boot349.releasing && touch_port_pressed_since(s_boot349.press_at) && !touch_port_pressed_since(now);
     int action=boot349_poll(&s_boot349,now,down,fresh,touch_port_confirm_up(),setup_active());
     if(action==BOOT349_RESET){
         ESP_LOGI(TAG,"BOOT + tap: reset prompt");touch_port_confirm_open();
@@ -344,6 +363,25 @@ static void sleep_button_poll(int64_t now) {
         boot349_toggle_light(&tank);progression_settings_changed();
         ESP_LOGI(TAG,"BOOT: aquarium light %s (MANUAL)",tank.light_manual_off?"off":"on");
     }
+}
+#endif
+static void sleep_button_poll(int64_t now) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    boot349_edge_t edges[BOOT349_EDGE_CAP];unsigned count;bool overflow;
+    /* Snapshot timestamps and a matching cutoff under the sampler lock. */
+    portENTER_CRITICAL(&s_boot_mux);
+    now=esp_timer_get_time();count=s_boot_capture.count;overflow=s_boot_capture.overflow;
+    memcpy(edges,s_boot_capture.edges,count*sizeof edges[0]);
+    s_boot_capture.count=0;s_boot_capture.overflow=false;
+    if(overflow){s_boot349=(boot349_button_t){0};s_boot_replay_down=s_boot_capture.raw_down;}
+    portEXIT_CRITICAL(&s_boot_mux);
+    if(overflow){ESP_LOGW(TAG,"BOOT edge buffer overflow: gesture discarded");return;}
+    for(unsigned i=0;i<count;i++){
+        s_boot_replay_down=edges[i].down;
+        boot349_dispatch(edges[i].at,edges[i].down);
+    }
+    boot349_dispatch(now,s_boot_replay_down);
+
 #else
 
     if (gpio_get_level(BTN_SLEEP)) {
@@ -891,6 +929,13 @@ void app_main(void) {
             heap_caps_free(tmp);
         }
     }
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    boot349_capture_enable(true);
+    esp_timer_handle_t boot_timer;
+    const esp_timer_create_args_t boot_args={.callback=boot349_sample,.name="boot-gpio",.skip_unhandled_events=true};
+    ESP_ERROR_CHECK(esp_timer_create(&boot_args,&boot_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(boot_timer,BOOT349_SAMPLE_US));
+#endif
     xTaskCreatePinnedToCore(tank_task, "tank", 12288, NULL, 4, NULL, 0);
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
     ESP_LOGI(TAG, "V1 initialized: internal free/largest %u/%u; PSRAM free/largest %u/%u bytes",
