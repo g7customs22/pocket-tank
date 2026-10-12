@@ -99,6 +99,8 @@ bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
     if(s->species_picker || s->habitat_picker || s->slots_picker) return false;
     if (x < 0 || x >= UI349_W || y < 0 || y >= UI349_H) return false;
     if(ui349_clean_view(s)){*tx=x*(TANK_W-1)/(UI349_W-1);*ty=y*(TANK_H-1)/(UI349_H-1);return true;}
+    /* Visible selector strip owns its gaps too: near-misses never tap/feed fish. */
+    if(ui349_world_view(s)&&!s->positioning&&y>=6&&y<58)return false;
     if (ui349_world_view(s)) return v1_map_landscape(x, y, false, tx, ty);
     if (fish_view(s) && x >= FISH_VIEW_X && x < FISH_VIEW_X+FISH_VIEW_W) {
         *tx=s->camera_x+x-FISH_VIEW_X; *ty=s->camera_y+y; return true;
@@ -123,7 +125,8 @@ static int rail_hit(const ui349_state_t *s, int x, int y) {
             if(x>=104 && x<536 && y>=8+i*52 && y<52+i*52) return UI349_HABITAT_PICK+i;
         return UI349_CONSUMED;
     }
-    if(!s->view.key && !s->positioning && x>=8 && x<140 && y>=8 && y<44) return UI349_TANKS;
+    if(!s->view.key && !s->positioning && y>=8 && y<56)
+        for(int i=0;i<3;i++)if(x>=8+i*176 && x<176+i*176)return UI349_SLOT_PICK+i;
     if(s->species_picker) {
         if(x>=552 && x<632 && y>=12 && y<60) return UI349_SPECIES_BACK;
         if(x>=552&&x<632&&y>=68&&y<108)return s->species_page>0?UI349_SPECIES_PREV:UI349_CONSUMED;
@@ -140,6 +143,7 @@ static int rail_hit(const ui349_state_t *s, int x, int y) {
         if (x >= 8 && x < 118 && y >= 8 && y < 44) return 12;
         if (x >= 552 && x < 632 && y >= 8 && y < 44) return UI349_NEXT;
     } else if (s->view.key) {
+        if(s->view.key==400 && x>=8 && x<84 && y>=6 && y<34)return UI349_TANKS;
         if (x >= 8 && x < 84) {
             if (y >= 40 && y < 88 && s->scroll > 0) return 10;
             if (y >= 112 && y < 160 && s->scroll < UI349_SCROLL_MAX) return 11;
@@ -151,7 +155,7 @@ static int rail_hit(const ui349_state_t *s, int x, int y) {
         }
         if (can_position(s) && x >= 552 && x < 632 && y >= 12 && y < 60) return 12;
 #ifdef POCKET_TANK_WIDE_V1
-    } else if (x >= 552 && x < 632 && y >= 8 && y < 44) {
+    } else if (x >= 552 && x < 632 && y >= 8 && y < 56) {
         return UI349_MENU;
 #else
     } else if (x >= 440 && x < 624) {
@@ -267,7 +271,8 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
     if (!ui349_world_view(s)) {
         for (int y=0; y<UI349_H; y++)
             memcpy(native+y*UI349_W+UI349_PAGE_X,source+(y+s->scroll)*TANK_W,(fish_view(s) ? FISH_VIEW_X-UI349_PAGE_X : TANK_UI_W)*sizeof(uint16_t));
-        text(native,6,10,2,0xa9e2dd,s->view.title);
+        if(s->view.key==400)button(native,8,6,76,28,"TANKS",2,true);
+        else text(native,6,10,2,0xa9e2dd,s->view.title);
         button(native,8,40,76,48,"UP",3,s->scroll>0);
         button(native,8,112,76,48,"DOWN",3,s->scroll<UI349_SCROLL_MAX);
         rect(native,89,0,3,UI349_H,0x265b62);
@@ -301,9 +306,13 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
             text(native,200,14,2,0xf2ffff,"DRAG TO POSITION");
             button(native,552,8,80,36,"DONE",2,true);
         } else {
-            const char *title=HABITAT_NAMES[s->active_slot<3?s->active_slot:0];
-            button(native,8,8,132,36,title,2,true);
-            button(native,552,8,80,36,"MENU",2,true);
+            for(int i=0;i<3;i++){
+                int x=8+i*176;
+                if(s->active_slot==(unsigned)i)rect(native,x-2,6,172,52,0xd8bd76);
+                button(native,x,8,168,48,HABITAT_NAMES[i],2,true);
+                if(s->active_slot==(unsigned)i)rect(native,x+12,50,144,3,0xd8bd76);
+            }
+            button(native,552,8,80,48,"MENU",2,true);
             /* Only glyph outlines touch the scene: no rectangle or panel. */
             char level[12];
             if(s->battery.mv)snprintf(level,sizeof level,"~%d%%",s->battery.pct);
@@ -314,7 +323,7 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
             if(s->battery.warning_s)text(native,55,158,1,0xffce73,"LOW BATTERY");
             text(native,440,158,1,0xa9e2dd,t->uv.style?(t->night?"UV / OFF":"UV / ON"):(t->night?"WHITE / OFF":"WHITE / ON"));
             if(s->feed_notice_s)text(native,248,148,1,0xffce73,"FOOD LIMIT - WAIT FOR FISH");
-            if(s->slot_error)text(native,152,16,1,0xffce73,"SAVE UNAVAILABLE");
+            if(s->slot_error)text(native,248,128,1,0xffce73,"SAVE UNAVAILABLE");
         }
 #else
         text(native,10,10,3,0xf2ffff,"POCKET TANK");

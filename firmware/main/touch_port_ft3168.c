@@ -157,7 +157,7 @@ void touch_port_poll(tank_t *t) {
         else if(action==UI349_UNDO)s_slot_request=-2;
         else if(action==UI349_TANKS_BACK) g_ui349.slots_picker=false;
         else if(action==UI349_TANK_STYLE) {g_ui349.slots_picker=false;g_ui349.habitat_picker=true;}
-        else if(action>=UI349_SLOT_PICK&&action<UI349_SLOT_PICK+3) s_slot_request=action-UI349_SLOT_PICK;
+        else if(action>=UI349_SLOT_PICK&&action<UI349_SLOT_PICK+3) s_slot_request=ui349_slot_request(&g_ui349,action);
         else if(action==UI349_HABITAT) g_ui349.habitat_picker=true;
         else if(action==UI349_HABITAT_BACK) g_ui349.habitat_picker=false;
         else if(action>=UI349_HABITAT_PICK && action<UI349_HABITAT_PICK+HABITAT_COUNT) {

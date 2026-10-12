@@ -112,7 +112,31 @@ int main(void) {
     assert(!ui349_map(&s,300,80,&tx,&ty));
     ui349_configure(&s,(ui349_view_t){400,"MENU",true,0}); assert(!s.species_picker);
     ui349_configure(&s,(ui349_view_t){0,"TANK",true,0});
-    assert(tap(&s,65,24)==UI349_TANKS);
+    assert(tap(&s,65,24)==UI349_SLOT_PICK);
+    for(int slot=0;slot<3;slot++){
+        s.active_slot=(unsigned)slot;
+        for(int y=8;y<56;y++)for(int x=8+slot*176;x<176+slot*176;x++){
+            int a=tap(&s,x,y);assert(a==UI349_SLOT_PICK+slot);
+            assert(ui349_slot_request(&s,a)==-1);
+            s.active_slot=(unsigned)((slot+1)%3);assert(ui349_slot_request(&s,a)==slot);s.active_slot=(unsigned)slot;
+        }
+    }
+    assert(tap(&s,590,55)==UI349_MENU);
+    assert(tap(&s,180,20)==UI349_CONSUMED);assert(tap(&s,356,20)==UI349_CONSUMED);assert(tap(&s,540,20)==UI349_CONSUMED);
+    assert(tap(&s,20,7)==UI349_CONSUMED);assert(tap(&s,20,56)==UI349_CONSUMED);
+    for(int slot=0;slot<3;slot++){
+        assert(ui349_input(&s,true,20+slot*176,20,&down,&tx,&ty)==UI349_CONSUMED);
+        assert(ui349_input(&s,true,40+slot*176,20,&down,&tx,&ty)==UI349_CONSUMED);
+        assert(ui349_input(&s,false,0,0,&down,&tx,&ty)==UI349_CONSUMED);
+    }
+    s.controls_hidden=true;
+    for(int slot=0;slot<3;slot++){
+        assert(ui349_input(&s,true,20+slot*176,20,&down,&tx,&ty)==UI349_PASS&&down);
+        assert(ui349_input(&s,false,0,0,&down,&tx,&ty)==UI349_PASS&&!down);
+    }
+    s.controls_hidden=false;
+    ui349_configure(&s,(ui349_view_t){400,"MENU",true,0});assert(tap(&s,40,20)==UI349_TANKS);
+    ui349_configure(&s,(ui349_view_t){0,"TANK",true,0});
     s.habitat_picker=true;
     for(int h=0;h<HABITAT_COUNT;h++) assert(tap(&s,200,25+h*52)==UI349_HABITAT_PICK+h);
     assert(tap(&s,590,30)==UI349_HABITAT_BACK);
