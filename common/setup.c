@@ -627,7 +627,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         bool grid = s_kbd == SETUP_KBD_GRID;
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
-        if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, clock);
+        if (grid) render_fish_portrait(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f, clock);
         const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
         int n = name_len(f);
         for (int i = 0; i < FISH_NAME_MAX; i++) {
