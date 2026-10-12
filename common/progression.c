@@ -525,15 +525,25 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
 #ifdef POCKET_TANK_WIDE_V1
     int a,b;bool pair=progression_breed_pair(t,&a,&b);
     memset(out,0,sizeof(*out)*3);
-    const char *titles[]={"PAIR","NURSERY","REST"};
+    const char *titles[]={"PAIR + CARE","NURSERY","REST"};
     const char *words[]={"SAME SPECIES ADULT PAIR","KEEP SOME PLANT COVER","SIX HOURS BETWEEN FRY"};
-    const char *words2[]={"WELL FED, CALM, RESTED","15 MINUTES OF GOOD CARE","ONLY ACTIVE TIME COUNTS"};
+    const char *words2[]={"15 MIN FED, CALM AND RESTED","TALL ENOUGH TO HIDE IN","ONLY ACTIVE TIME COUNTS"};
     for(int i=0;i<3;i++){snprintf(out[i].title,sizeof out[i].title,"%s",titles[i]);snprintf(out[i].words,sizeof out[i].words,"%s",words[i]);snprintf(out[i].words2,sizeof out[i].words2,"%s",words2[i]);}
-    out[0].met=pair;out[0].frac=pair?1:0;out[0].kind=FRY_REQ_GROW;
-    out[1].met=s_breed_ready>=BREED_READY_S;out[1].frac=s_breed_ready/BREED_READY_S;out[1].kind=FRY_REQ_GRASS;
+    /* Cover is independent of the eligible-pair care timer. In particular,
+     * the mixed-species starter tanks already have a nursery, even though
+     * they cannot accumulate breeding time until a matching pair exists. */
+    out[0].met=pair && s_breed_ready>=BREED_READY_S;
+    out[0].frac=pair?s_breed_ready/BREED_READY_S:0;out[0].kind=FRY_REQ_GROW;
+    float best=0;
+    for(int bed=0;bed<tank_veg_beds(t);bed++)
+        if(t->veg_growth[bed]>best)best=t->veg_growth[bed];
+    out[1].met=tank_nursery_bed(t)>=0;
+    out[1].frac=out[1].met?1:best/VEG_NURSERY;out[1].kind=FRY_REQ_GRASS;
     out[2].met=s_breed_cool<=0;out[2].frac=1-s_breed_cool/BREED_COOLDOWN_S;out[2].kind=FRY_REQ_FEED;
-    snprintf(out[0].progress,sizeof out[0].progress,"%s",pair?"PAIR READY":"PAIR NOT READY");
-    snprintf(out[1].progress,sizeof out[1].progress,"%d / 15 MIN",(int)s_breed_ready/60);
+    if(pair) snprintf(out[0].progress,sizeof out[0].progress,"%d / 15 MIN",(int)s_breed_ready/60);
+    else snprintf(out[0].progress,sizeof out[0].progress,"PAIR NOT READY");
+    if(out[1].met) snprintf(out[1].progress,sizeof out[1].progress,"A NURSERY BED IS READY");
+    else snprintf(out[1].progress,sizeof out[1].progress,"TALLEST BED %d%% THERE",(int)(out[1].frac*100+0.5f));
     snprintf(out[2].progress,sizeof out[2].progress,"%d MIN REMAIN",(int)(s_breed_cool+59)/60);
     return 3;
 #endif
