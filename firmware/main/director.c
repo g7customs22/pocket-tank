@@ -35,7 +35,7 @@ static const char *TAG = "director";
  * The staged tank autosaves over "save" like any other; `restore` copies "bk"
  * back and reboots progression from it. */
 static bool nvs_copy(const char *from, const char *to) {
-    nvs_handle_t h; if (nvs_open("tank", NVS_READWRITE, &h) != ESP_OK) return false;
+    nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
     size_t len = 0; bool ok = false;
     if (nvs_get_blob(h, from, NULL, &len) == ESP_OK && len > 0) {
         void *buf = malloc(len);
@@ -46,12 +46,12 @@ static bool nvs_copy(const char *from, const char *to) {
     nvs_close(h); return ok;
 }
 static bool nvs_has(const char *key) {
-    nvs_handle_t h; if (nvs_open("tank", NVS_READONLY, &h) != ESP_OK) return false;
+    nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
     size_t len = 0; bool ok = nvs_get_blob(h, key, NULL, &len) == ESP_OK && len > 0;
     nvs_close(h); return ok;
 }
 static void nvs_drop(const char *key) {
-    nvs_handle_t h; esp_err_t e = nvs_open("tank", NVS_READWRITE, &h);
+    nvs_handle_t h; esp_err_t e = nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h);
     if (e == ESP_OK) { e = nvs_erase_key(h, key); if (e == ESP_OK) e = nvs_commit(h); nvs_close(h); }
     if (e != ESP_OK) ESP_LOGW(TAG, "drop %s failed: %s", key, esp_err_to_name(e));
     else if (nvs_has(key)) ESP_LOGW(TAG, "drop %s: still there after the erase", key);
@@ -128,6 +128,8 @@ static void show_state(const tank_t *t) {
     ESP_LOGI(TAG, "sand dollars %d (earned %d) | shop:%s%s%s | colonies %d | %.0f cm trimmed",
              (int)t->sd_balance, (int)t->sd_earned, t->sd_unlocks & SD_ITEM_PLANT ? " plant" : "", t->sd_unlocks & SD_ITEM_SNAIL ? " snail" : "",
              t->sd_unlocks ? "" : " -", (int)t->algae_colonies, t->trim_px / PX_PER_CM);
+    for(int item=0;item<SD_ITEM_COUNT;item++) if(t->sd_unlocks & SD_ITEMS[item].bit)
+        ESP_LOGI(TAG,"owned: %s",SD_ITEMS[item].name);
     if (t->sd_unlocks & SD_ITEM_SNAIL) {                /* where it is, what it is after */
         int c = t->snail_cell, cells = 0; for (int i = 0; i < ALGAE_CELLS; i++) cells += t->algae[i] > 0;
         ESP_LOGI(TAG, "snail at %.0f,%.0f heading %.0f deg | %s cell %d at %d,%d (film %d) | %d cells on the glass | %d grazed so far", t->snail_x, t->snail_y,
@@ -266,6 +268,9 @@ static void run(tank_t *t, char *line) {
     } else if (!strcmp(c, "shop")) {                 /* the sand dollar page */
         bool on = argc < 2 || strcmp(argv[1], "off");
         touch_port_show_shop(on); ESP_LOGI(TAG, "shop page %s", on ? "up (CLOSE ends it)" : "closed");
+    } else if (!strcmp(c, "balance") && argc==2 && !strcmp(argv[1], "1000")) {
+        t->sd_balance=1000; progression_save(t);
+        ESP_LOGI(TAG,"balance set to 1000 and saved");
     } else if (!strcmp(c, "dollars")) {              /* dollars [n]: grant n (negative takes), or just the balance */
         if (argc > 1) progression_sd_grant(t, atoi(argv[1]));
         ESP_LOGI(TAG, "sand dollars %d (earned %d) | colonies %d | %.0f cm trimmed", (int)t->sd_balance, (int)t->sd_earned,

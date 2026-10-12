@@ -10,8 +10,9 @@
 #define PSRAM_PLAN_H
 
 #include <stdint.h>
+#include "tank.h"
 
-#define PLAN_FB_W            448
+#define PLAN_FB_W            TANK_W
 #define PLAN_FB_H            368
 #define PLAN_FB_BYTES        (PLAN_FB_W * PLAN_FB_H * 2)          /* 329,728 */
 #define PLAN_FB_COUNT        2                                    /* double buffer */

@@ -13,7 +13,9 @@
 /* which accel axis is "up" when the tank is held right side up. The boot log
  * prints the live vector ("imu: g=[x y z]") — if the flip is wrong or dead,
  * hold the device upright, read which axis carries ~1 g, and fix these two. */
-#define IMU_UP_AXIS 1        /* 0=X 1=Y 2=Z; calibrated 2026-08-28: upright-in-hand = -Y ~16k */
+#define IMU_UP_AXIS 1        /* 0=X 1=Y 2=Z; upright-in-hand = -Y ~16k.
+                             * V1 Case A measured 2026-10-02: buttons up -16076,
+                             * buttons down +16827 (eight samples per pose). */
 #define IMU_UP_SIGN (-1)
 
 #define QMI8658_ADDR       0x6B

@@ -24,6 +24,9 @@
 #include "touch_port.h"
 #include "battery_port.h"
 #include "battery.h"
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+#include "slot_system.h"
+#endif
 #include "imu_port.h"
 #include "director.h"
 #include "brightness.h"
@@ -45,6 +48,11 @@
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+#include "board_waveshare_349_v1.h"
+#include "ui_349_v1.h"
+#include "boot_light_349_v1.h"
+#endif
 
 /* BOOT (GPIO0, active low, RTC-wake capable): the reset chord (held + a tap
  * on the glass), the director's deep-sleep wake, and the sleep key only on a
@@ -53,8 +61,8 @@
  * from which ONLY that key (or USB) can bring the board back, so it has to
  * be the one key the keeper ever presses - press to sleep, press to wake. */
 #define BTN_SLEEP GPIO_NUM_0
-static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
+static bool s_power_key;                   /* Board has a PWR key/latch; independent of meter availability. */
+#if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_WAVESHARE_349_V1)
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -101,8 +109,12 @@ static void enter_poweroff(void);
 static void deep_sleep_now(int wake_after_s);
 static bat_t s_bh;                          /* the battery page's history: NVS "bat"/"hist" (its own namespace - a tank reset leaves it) */
 static void bat_hist_save(void);            /* at sleep too: the screen-on time so far */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+static boot349_button_t s_boot349;
+#else
 static bool s_btn_armed; static int64_t s_btn_low_since;   /* sleep_button_poll state */
 static bool s_btn_used;   /* this press opened the reset prompt: no drowse, no power-off from it */
+#endif
 
 /* Sleep (2026-09-14, revised the same day after Strato found a quick
  * sleep/wake "feels like a soft boot"): two stages.
@@ -174,7 +186,7 @@ static void enter_sleep_for(int wake_after_s) {
     int64_t grace_us = wake_after_s > 0 ? DIRECTOR_GRACE_US : SLEEP_GRACE_US;
     ESP_LOGI(TAG, "sleep: save, panel off, %d s grace then %s | battery %d%% %d mV",
              (int)(grace_us / 1000000),
-             wake_after_s > 0 ? "deep sleep with the timer" : s_pmic ? "PMIC power-off (the PWR key boots it)" : "deep sleep (BOOT wakes)", pct0, mv0);
+             wake_after_s > 0 ? "deep sleep with the timer" : s_power_key ? "board power-off (the PWR key boots it)" : "deep sleep (BOOT wakes)", pct0, mv0);
     touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
     if (!progression_save(&tank))               /* never cancels: a tank that can't save (NVS down, a save that
                                                    wouldn't load) must still sleep, or the key goes dead */
@@ -186,6 +198,10 @@ static void enter_sleep_for(int wake_after_s) {
     imu_port_sleep();          /* quiesce BEFORE the rails cycle (latch-up guard) */
     display_port_sleep();
     while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* wake triggers are level-low: never arm them held */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    board_349_v1_wait_key_release();
+    battery_port_key_init();
+#endif
     vTaskDelay(pdMS_TO_TICKS(30));
     /* stage 1: the grace, RAM alive - light sleep in 1 s slices, each wake a
        one-byte I2C read of the PMIC's IRQ status for the PWR key (no IRQ line
@@ -197,11 +213,17 @@ static void enter_sleep_for(int wake_after_s) {
         int64_t left = grace_us - (esp_timer_get_time() - t0);
         if (left <= 0) break;
         gpio_wakeup_enable(BTN_SLEEP, GPIO_INTR_LOW_LEVEL);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        gpio_wakeup_enable(V1_PWR_KEY, GPIO_INTR_LOW_LEVEL);
+#endif
         esp_sleep_enable_gpio_wakeup();
         esp_sleep_enable_timer_wakeup(left < KEY_POLL_US ? left : KEY_POLL_US);
         esp_light_sleep_start();
         esp_sleep_wakeup_cause_t why = esp_sleep_get_wakeup_cause();
         gpio_wakeup_disable(BTN_SLEEP);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        gpio_wakeup_disable(V1_PWR_KEY);
+#endif
         /* wake sources are STICKY in ESP-IDF (s_config.wakeup_triggers): the
          * grace's timer would otherwise follow us into stage 2 and boot the
          * tank 90 s later - which it did (2026-09-14: every sleep since the
@@ -212,6 +234,10 @@ static void enter_sleep_for(int wake_after_s) {
     }
     if (pressed) {                              /* a quick wake: resume in place */
         while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* a BOOT wake press, still down */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        board_349_v1_wait_key_release();
+        battery_port_key_init();
+#endif
         float napped = (esp_timer_get_time() - t0) / 1e6f;
         tank_tick_sleep(&tank, napped);         /* the nap counts, tiny as it is */
         progression_woke(&tank);                /* a fry that was on its way: born now (2026-09-24) */
@@ -219,13 +245,18 @@ static void enter_sleep_for(int wake_after_s) {
         display_port_wake();
         imu_port_wake();
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "nap");
-        s_snap_n = 0; s_btn_armed = false; s_btn_low_since = 0;   /* require a fresh press */
+        s_snap_n = 0;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        memset(&s_boot349,0,sizeof s_boot349); /* wake press must be released before light control */
+#else
+        s_btn_armed = false; s_btn_low_since = 0;   /* require a fresh press */
+#endif
         ESP_LOGI(TAG, "wake within the grace: resumed in place after %.0f s", napped);
         return;
     }
     /* stage 2: the grace passed. The save (written before the grace) plus the
        RTC clock cover the whole dark stretch at the next boot. */
-    if (wake_after_s <= 0 && s_pmic) {
+    if (wake_after_s <= 0 && s_power_key) {
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "off");   /* mirrored to NVS: the morning reads it back */
         ESP_LOGI(TAG, "grace over: PMIC power-off (the PWR key or USB boots the tank; the night is lived through at that boot)");
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -243,7 +274,13 @@ static void enter_sleep(void) { enter_sleep_for(0); }
 static void deep_sleep_now(int wake_after_s) {
     ESP_LOGI(TAG, "deep sleep (BOOT wakes%s)", wake_after_s > 0 ? ", or the timer" : "");
     rtc_gpio_pullup_en(BTN_SLEEP); rtc_gpio_pulldown_dis(BTN_SLEEP);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    board_349_v1_wait_key_release();
+    rtc_gpio_pullup_en(V1_PWR_KEY); rtc_gpio_pulldown_dis(V1_PWR_KEY);
+    ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup((1ULL << BTN_SLEEP) | (1ULL << V1_PWR_KEY), ESP_EXT1_WAKEUP_ANY_LOW));
+#else
     esp_sleep_enable_ext0_wakeup(BTN_SLEEP, 0);
+#endif
     if (wake_after_s > 0) esp_sleep_enable_timer_wakeup((int64_t)wake_after_s * 1000000);
     audio_port_deep_sleep_pins();
     gpio_deep_sleep_hold_en();
@@ -292,8 +329,20 @@ static void pwr_key_poll(int64_t now) {
  * key as it was until 2026-09-16; a chord press never is. */
 #define BTN_DEBOUNCE_US 50000
 static void sleep_button_poll(int64_t now) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    bool down=!gpio_get_level(BTN_SLEEP);
+    bool fresh=s_boot349.down && touch_port_pressed_since(s_boot349.press_at);
+    int action=boot349_poll(&s_boot349,now,down,fresh,touch_port_confirm_up(),setup_active());
+    if(action==BOOT349_RESET){
+        ESP_LOGI(TAG,"BOOT + tap: reset prompt");touch_port_confirm_open();
+    }else if(action==BOOT349_LIGHT){
+        boot349_toggle_light(&tank);progression_settings_changed();
+        ESP_LOGI(TAG,"BOOT: aquarium light %s (MANUAL)",tank.light_manual_off?"off":"on");
+    }
+#else
+
     if (gpio_get_level(BTN_SLEEP)) {
-        if (!s_pmic && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US)
+        if (!s_power_key && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US)
             enter_sleep();
         s_btn_armed = true; s_btn_low_since = 0; s_btn_used = false;
     } else if (s_btn_armed) {
@@ -304,6 +353,7 @@ static void sleep_button_poll(int64_t now) {
             touch_port_confirm_open();
         }
     }
+#endif
 }
 
 /* the keeper said YES: every saved tank goes - the live one and a director-
@@ -409,7 +459,16 @@ static void battery_frame(int64_t now) {
 
 static void reset_tank(void) {
     ESP_LOGW(TAG, "RESET: wiping the tank (%d fish) for a fresh one", tank.n_fish);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    if(slot_system_blocked() || !advisor_llm_esp_quiesce() || (slot_system_enabled() && !slot_system_reset(&tank,(uint32_t)esp_timer_get_time() ^ 0xC0FFEEu))) {
+        g_ui349.slot_error=true;ESP_LOGE(TAG,"reset failed; old tank kept");return;
+    }
+    if(!slot_system_enabled())
+#endif
     progression_reset(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    g_ui349.can_undo=slot_system_has_undo();
+#endif
     notice_sync(&tank);                         /* a fresh tank has nothing to announce */
     brightness_save();                          /* the erase took the setting with it */
     ESP_LOGI(TAG, "fresh tank: %s + %s, both fry", tank.fish[0].name, tank.fish[1].name);
@@ -430,17 +489,42 @@ static void tank_task(void *arg) {
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
         bool inv = imu_port_inverted();
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        /* The V1 panel's base mapping is upside down with Case A buttons up.
+         * Apply the same mounting correction to display and touch. */
+        inv = !inv;
+#endif
         display_port_set_inverted(inv);   /* per-frame, so a flip lands between flushes */
         touch_port_set_inverted(inv);
         touch_port_poll(&tank);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        int slot_request=touch_port_take_slot();
+        if(tank_take_feed_full())g_ui349.feed_notice_s=3;
+        if(slot_request>=0||slot_request==-2) {
+            bool switched=!setup_active() && advisor_llm_esp_quiesce() && (slot_request==-2?slot_system_undo(&tank):slot_system_switch(&tank,(unsigned)slot_request));
+            if(switched){
+                setup_cancel(&tank);touch_port_slot_changed();notice_sync(&tank);
+                g_ui349.slots_picker=false;g_ui349.owner=0;
+                if(progression_setup_pending())setup_begin(&tank);
+            }
+            g_ui349.slot_error=!switched;
+            g_ui349.active_slot=slot_system_active();g_ui349.slots_present=slot_system_present();
+    for(unsigned i=0;i<3;i++)g_ui349.slot_fish[i]=slot_system_fish_count(i);
+    g_ui349.can_undo=slot_system_has_undo();
+            last=esp_timer_get_time();dt=0;
+        }
+#endif
         director_poll(&tank);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        touch_port_poll(&tank); /* serial/save work must not share a blind span with rendering */
+#endif
         int ans = touch_port_confirm_take();
         if (ans > 0) reset_tank();
         else if (ans < 0) ESP_LOGI(TAG, "reset prompt: tank kept");
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */
           if (w == SET_TAP_BRIGHT) brightness_set_level(v);
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
-          else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
+          else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (BOOT button on V1; double-tap on other boards)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL */
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
@@ -464,6 +548,12 @@ static void tank_task(void *arg) {
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }
         tank.hold_light = setup_active() || touch_port_confirm_up();   /* no lights-out mid-name */
         tank.ui_cover = tank.hold_light || touch_port_milestones() || touch_port_settings() || touch_port_shop() || touch_port_battery();   /* a fry's spawning waits */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        tank.ui_cover = tank.ui_cover || g_ui349.slots_picker || g_ui349.habitat_picker;
+#endif
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        touch_port_poll(&tank);
+#endif
         tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
         progression_tick(&tank, dt);
         battery_frame(now);
@@ -488,6 +578,9 @@ static void tank_task(void *arg) {
                 s_prefetch_pending = false;
                 render_fb_primed(s_prefetch_fb, s_prefetch_ep);
             }
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+            touch_port_poll(&tank); /* after prefetch wait, before the render work */
+#endif
             int64_t t0 = esp_timer_get_time();
             render_tank(&tank, fb[cur], TANK_W);
             touch_port_poll(&tank);          /* the CST816 is polled, not interrupt-
@@ -496,6 +589,26 @@ static void tank_task(void *arg) {
                                                 between 40 ms frame boundaries */
             int sel = touch_port_selected();
             int64_t tc = esp_timer_get_time();
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+            ui349_view_t view = {0, "TANK", true, 0};
+            if (touch_port_confirm_up()) view = (ui349_view_t){1000, "RESET", false, RENDER_CONFIRM_Y};
+            else if (setup_active()) view = (ui349_view_t){100 + setup_page(), "SETUP", false, 0};
+            else if (touch_port_settings()) view = (ui349_view_t){200, "OPTIONS", true, 0};
+            else if (touch_port_shop()) view = (ui349_view_t){300, "SHOP", true, 0};
+            else if (touch_port_milestones()) view = (ui349_view_t){400, "MENU", true, 0};
+            else if (notice_current()) view = (ui349_view_t){500, "NEWS", true, 76};
+            else if (touch_port_battery()) view = (ui349_view_t){600, "BATTERY", true, 0};
+            else if (sel >= 0) view = (ui349_view_t){700 + sel, "FISH", true, 0};
+            /* Opening a description is a view change even within the same menu.
+             * Start at its title/text; UP still reaches the illustration. */
+            int focus = touch_port_shop() ? render_shop_focus()
+                      : touch_port_milestones() ? render_milestones_focus() : -1;
+            if (focus >= 0 && (view.key == 300 || view.key == 400)) {
+                view.key += 2000 + focus;
+                view.initial_scroll = focus;
+            }
+            display349_view(&tank, view, fb[cur]);
+#endif
             if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
@@ -523,12 +636,19 @@ static void tank_task(void *arg) {
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
-            if (setup_active())                  /* first-run setup: over the tank, under the prompt */
+            if (setup_active()
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+                && !g_ui349.positioning
+#endif
+            )                                   /* placement can use the full world view */
                 render_setup(&tank, fb[cur], TANK_W, tank.clock);
             if (touch_port_confirm_up())         /* reset prompt: over everything, fish still swim */
                 render_confirm_reset(fb[cur], TANK_W, touch_port_confirm_frac());
             int64_t t1 = esp_timer_get_time();
             if (sel >= 0) { card_us += t1 - tc; card_frames++; }
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+            touch_port_poll(&tank); /* overlays and composition get separate sampling intervals */
+#endif
             display_port_flush(fb[cur]);
             touch_port_poll(&tank);
             render_us += t1 - t0; flush_us += esp_timer_get_time() - t1; frames++;
@@ -618,6 +738,10 @@ static void nvs_start(void) {
 }
 
 void app_main(void) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    /* Latch battery power before NVS work or the model's boot benchmark. */
+    ESP_ERROR_CHECK(board_349_v1_init());
+#endif
     ESP_LOGI(TAG, "pocket-tank v%s %s (build %s) boot%s", PT_RELEASE, PT_RELEASE_STAGE, version_port_string(),
              esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 ? " (woken by button)" : "");
     gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
@@ -644,7 +768,11 @@ void app_main(void) {
        every frame, and in PSRAM that was ~1.5 ms; PSRAM fallback */
     { void *ds = heap_caps_malloc(render_decor_scratch_size(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* the coral / cluster tables: PSRAM, never .bss */
       if (ds) render_set_decor_scratch(ds); else ESP_LOGW(TAG, "decor scratch: no PSRAM (%u B) - falling back to internal", (unsigned)render_decor_scratch_size()); }
-    uint32_t *dirty = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint32_t *dirty = NULL;
+#ifndef POCKET_TANK_WIDE_V1
+    dirty = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#endif
+    /* Wide mask is 60 KiB: reserve internal RAM for LCD/audio DMA and tasks. */
     if (!dirty) dirty = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (dirty) render_set_dirty_mask(dirty); else ESP_LOGW(TAG, "no dirty mask RAM: full redraw per frame");
     ESP_LOGI(TAG, "dirty mask %s", !dirty ? "none" : esp_ptr_external_ram(dirty) ? "PSRAM" : "internal SRAM");
@@ -667,9 +795,16 @@ void app_main(void) {
         } else ESP_LOGE(TAG, "model mmap failed");
     }
     render_clock_us = esp_timer_get_time;    /* per-stage frame profiling in the display log */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    if (!fb[0] || !llm_ok || !display_port_init() || !touch_port_init()) {
+        ESP_LOGE(TAG, "V1 bring-up requires framebuffer, original model, display and touch");
+        abort();
+    }
+#else
     display_port_init();
     touch_port_init();
-    s_pmic = battery_port_init(board_i2c_bus());
+#endif
+    s_power_key = battery_port_init(board_i2c_bus());
     battery_port_trim_rails();        /* the schematic's unused outputs off (docs/HANDOFF.md, the battery pass) */
     battery_port_key_init();          /* the PWR key: sleep / power-off IRQs on, the power-on press cleared */
     codec_port_init(board_i2c_bus());  /* the ES8311 fully down until a cue needs it (its digital side shares VCC3V3) */
@@ -691,7 +826,15 @@ void app_main(void) {
     rtc_port_init(board_i2c_bus());   /* wall clock for the ravenous rule */
     tank_init(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    bool from_sleep = cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_TIMER;
+    bool from_sleep = cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_TIMER
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+                      || cause == ESP_SLEEP_WAKEUP_EXT1
+#endif
+                      ;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    int slot_boot=slot_system_boot(&tank);
+    if(slot_boot<=0) {
+#endif
     if (from_sleep) {                        /* the night, lived through in one step */
         float h = progression_wake(&tank, clock_port_now_unix());
         ESP_LOGI(TAG, "wake from deep sleep (%s): %s%.1f h simulated | hunger[0] %.1f | battery %d%% %d mV",
@@ -706,6 +849,14 @@ void app_main(void) {
                  h < 0 ? "no save or no clock, " : "", h < 0 ? 0.0f : h,
                  tank.n_fish ? tank.fish[0].hunger : 0.0f, battery_pct(), battery_port_vbat_mv());
     }
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    }
+    if(slot_boot==0 && !slot_system_migrate(&tank))ESP_LOGE(TAG,"slot migration failed; original save retained");
+    g_ui349.active_slot=slot_system_active();g_ui349.slots_present=slot_system_present();
+    for(unsigned i=0;i<3;i++)g_ui349.slot_fish[i]=slot_system_fish_count(i);
+    g_ui349.can_undo=slot_system_has_undo();
+    g_ui349.slot_error=slot_system_blocked();
+#endif
     notice_sync(&tank);                      /* what is already earned stays unannounced */
     { uint32_t r = progression_loaded_release();   /* which release wrote the tank we just loaded */
       if (r) ESP_LOGI(TAG, "the save was written by v%d.%d.%d", (int)(r >> 16), (int)(r >> 8 & 255), (int)(r & 255));
@@ -732,4 +883,11 @@ void app_main(void) {
         }
     }
     xTaskCreatePinnedToCore(tank_task, "tank", 12288, NULL, 4, NULL, 0);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    ESP_LOGI(TAG, "V1 initialized: internal free/largest %u/%u; PSRAM free/largest %u/%u bytes",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+#endif
 }

@@ -8,6 +8,9 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef POCKET_TANK_WIDE_V1
+#include "slot_system.h"
+#endif
 
 static const char *TAG = "persist";
 
@@ -18,7 +21,52 @@ static const char *TAG = "persist";
  * A blob that exists but won't read blocks every save until a reset, so a
  * tank we could not load is never overwritten by a fresh one. */
 static bool s_save_blocked;
+#ifdef POCKET_TANK_WIDE_V1
+/* Copy the existing tank once. Never write to its namespace; rollback remains
+ * possible. The marker survives a keeper reset so it cannot resurrect old fish. */
+static bool import_previous_once(void) {
+    nvs_handle_t dst, src;
+    esp_err_t e = nvs_open(SAVE_NVS_NS, NVS_READWRITE, &dst);
+    if (e != ESP_OK) return false;
+    uint8_t done = 0;
+    e = nvs_get_u8(dst, "imported", &done);
+    if (e == ESP_OK && done) { nvs_close(dst); return true; }
+    if (e != ESP_OK && e != ESP_ERR_NVS_NOT_FOUND) { nvs_close(dst); return false; }
+    size_t existing = 0;
+    e = nvs_get_blob(dst, SAVE_NVS_KEY, NULL, &existing);
+    if (e == ESP_ERR_NVS_NOT_FOUND) {
+        e = nvs_open("tw49", NVS_READONLY, &src);
+        if (e == ESP_ERR_NVS_NOT_FOUND) e = nvs_open("tank", NVS_READONLY, &src);
+        if (e == ESP_OK) {
+            size_t len = 0; e = nvs_get_blob(src, SAVE_NVS_KEY, NULL, &len);
+            if (e == ESP_OK && len > 0) {
+                void *data = malloc(len);
+                if (!data) e = ESP_ERR_NO_MEM;
+                else {
+                    e = nvs_get_blob(src, SAVE_NVS_KEY, data, &len);
+                    if (e == ESP_OK) e = nvs_set_blob(dst, SAVE_NVS_KEY, data, len);
+                    free(data);
+                }
+                if (e == ESP_OK) ESP_LOGI(TAG, "copied previous tank to expansion namespace (%u bytes); original retained", (unsigned)len);
+            }
+            nvs_close(src);
+        }
+    }
+    if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
+    if (e == ESP_OK) e = nvs_set_u8(dst, "imported", 1);
+    if (e == ESP_OK) e = nvs_commit(dst);
+    nvs_close(dst);
+    return e == ESP_OK;
+}
+#endif
 bool persist_port_load(void *buf, size_t max, size_t *got) {
+#ifdef POCKET_TANK_WIDE_V1
+    if (!import_previous_once()) {
+        s_save_blocked = true;
+        ESP_LOGE(TAG, "wide tank import failed; saving blocked, original retained");
+        return false;
+    }
+#endif
     nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
     size_t len = 0; esp_err_t e = nvs_get_blob(h, SAVE_NVS_KEY, NULL, &len);   /* the stored length first */
     if (e == ESP_OK && len == 0) e = ESP_ERR_NVS_NOT_FOUND;         /* an empty blob is nothing saved */
@@ -42,6 +90,10 @@ bool persist_port_load(void *buf, size_t max, size_t *got) {
     return e == ESP_OK;
 }
 bool persist_port_save(const void *buf, size_t len) {
+#ifdef POCKET_TANK_WIDE_V1
+    if (slot_system_blocked()) return false;
+    if (slot_system_enabled()) return slot_system_save();
+#endif
     if (s_save_blocked) return false;
     nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
     esp_err_t e = nvs_set_blob(h, SAVE_NVS_KEY, buf, len); if (e == ESP_OK) e = nvs_commit(h);
@@ -51,8 +103,16 @@ bool persist_port_save(const void *buf, size_t len) {
 /* the keeper's reset: the whole "tank" namespace goes - "save" and the
  * director's parked "bk" alike - so nothing can bring the old tank back */
 bool persist_port_erase(void) {
+#ifdef POCKET_TANK_WIDE_V1
+    if (slot_system_blocked()) return false;
+    if (slot_system_enabled()) return true; /* reset replaces only active journal record */
+#endif
     nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
-    esp_err_t e = nvs_erase_all(h); if (e == ESP_OK) e = nvs_commit(h);
+    esp_err_t e = nvs_erase_all(h);
+#ifdef POCKET_TANK_WIDE_V1
+    if (e == ESP_OK) e = nvs_set_u8(h, "imported", 1);
+#endif
+    if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     if (e != ESP_OK) ESP_LOGW(TAG, "erase failed: %s", esp_err_to_name(e));
     else { ESP_LOGI(TAG, "every saved tank erased"); s_save_blocked = false; }

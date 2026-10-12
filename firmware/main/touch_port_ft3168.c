@@ -20,8 +20,15 @@
 #include "notice.h"
 #include "audio_port.h"
 #include "progression.h"
+#include "sdkconfig.h"
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+#include "board_waveshare_349_v1.h"
+#include "viewport_349_v1.h"
+#include "ui_349_v1.h"
+#else
 #include "esp_lcd_touch_ft5x06.h"
 #include "esp_lcd_touch_cst816s.h"
+#endif
 #include "esp_lcd_panel_io.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -29,7 +36,9 @@
 #include <math.h>
 
 static const char *TAG = "touch";
+#ifndef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 static esp_lcd_touch_handle_t s_tp;
+#endif
 static bool s_down; static int64_t s_press_us; static float s_px, s_py;
 static float s_lx, s_ly;                          /* LAST touched position (release classification) */
 static float s_fx[N_FISH_MAX], s_fy[N_FISH_MAX];  /* fish positions at press time */
@@ -47,13 +56,22 @@ static bool s_pill;                               /* main.c drew the battery pil
 static bool s_bat; static int64_t s_bat_us;       /* the battery page up, and since when (it closes itself) */
 #define BATTERY_PAGE_US (30LL * 1000000)
 #define CONFIRM_TIMEOUT_US (20LL * 1000000)
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+static int s_slot_request=-1;
+static bool s_press_world;
+static bool s_trimmed; /* Latch across simulation ticks until release. */
+#endif
 static bool s_inverted;                           /* screen 180-flipped: mirror into tank space */
 /* Fingers land a little BELOW where the eye aims - the pad rolls onto the
  * glass under the fingertip (phones shift their hit targets down for the
  * same reason; Strato saw it on the swatch rows, 2026-09-13). Reported
  * points move UP by this many px in displayed space; director `touch bias
  * <px>` tunes it live. */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+static int s_bias_y; /* The original panel's finger bias is not calibrated here. */
+#else
 static int s_bias_y = 10;
+#endif
 void touch_port_set_bias(int px) { s_bias_y = px; }
 int  touch_port_bias(void) { return s_bias_y; }
 
@@ -62,6 +80,12 @@ extern i2c_master_bus_handle_t board_i2c_bus(void);
 extern bool board_is_v2(void);
 
 bool touch_port_init(void) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    bool down; uint16_t x, y;
+    esp_err_t err = board_349_v1_touch(&down, &x, &y);
+    ESP_LOGI(TAG, "V1 touch startup: %s", esp_err_to_name(err));
+    return err == ESP_OK;
+#else
     esp_lcd_panel_io_handle_t io;
     bool v2 = board_is_v2();
     esp_lcd_panel_io_i2c_config_t io_cfg = v2 ? (esp_lcd_panel_io_i2c_config_t)ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG()
@@ -75,12 +99,82 @@ bool touch_port_init(void) {
     if (err != ESP_OK) { ESP_LOGW(TAG, "no %s", v2 ? "CST816" : "FT3168"); return false; }
     ESP_LOGI(TAG, "%s ready", v2 ? "CST816" : "FT3168");
     return true;
+#endif
 }
 
 /* call every frame from the tank task */
 void touch_port_poll(tank_t *t) {
     int64_t now = esp_timer_get_time();
     if (s_cf && now - s_cf_us > CONFIRM_TIMEOUT_US) touch_port_confirm_answer(-1);   /* nobody answered: keep the tank */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    static int64_t last_poll, report_at;
+    static unsigned reads, errors, timing_reads;
+    static int64_t read_us,max_read_us,max_gap_us;
+    static ui349_contact_t contact;
+    if(now-last_poll<8000) return;
+    if(last_poll&&now-last_poll>max_gap_us)max_gap_us=now-last_poll;
+    last_poll=now;
+    bool touched; uint16_t raw_x, raw_y;
+    reads++;
+    esp_err_t touch_err=board_349_v1_touch(&touched,&raw_x,&raw_y);
+    int64_t elapsed=esp_timer_get_time()-now;read_us+=elapsed;timing_reads++;
+    if(elapsed>max_read_us)max_read_us=elapsed;
+    if(touch_err!=ESP_OK)errors++;
+    if(now-report_at>=10000000) {
+        ESP_LOGI(TAG,"filter reads=%u accepted=%u rejected=%u errors=%u",reads,contact.accepted,contact.rejected,errors);
+        ESP_LOGI(TAG,"timing ms: read avg %.2f max %.2f poll-gap max %.2f (%u reads)",
+          read_us/1000.f/timing_reads,max_read_us/1000.f,max_gap_us/1000.f,timing_reads);
+        read_us=max_read_us=max_gap_us=0;timing_reads=0;report_at=now;
+    }
+    if(touch_err!=ESP_OK)return;
+    ui349_contact(&contact, now, &touched, &raw_x, &raw_y);
+    int mapped_x, mapped_y;
+    int ux = raw_x, uy = raw_y;
+    if (s_inverted) { ux = UI349_W - 1 - ux; uy = UI349_H - 1 - uy; }
+    int action = ui349_input(&g_ui349, touched, ux, uy, &touched, &mapped_x, &mapped_y);
+    if (action != UI349_PASS) {
+        if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
+        if (action == UI349_MENU || action == UI349_SETTINGS || action == UI349_SHOP) {
+            touch_port_dismiss(); notice_dismiss();
+            if (action == UI349_MENU) touch_port_show_milestones(true);
+            else if (action == UI349_SETTINGS) touch_port_show_settings(true);
+            else touch_port_show_shop(true);
+        }
+        else if (action == UI349_SPECIES && s_sel>=0 && s_sel<t->n_fish) {
+            g_ui349.species_picker=true; g_ui349.species_page=0; g_ui349.habitat=t->habitat; s_sel_us=now;
+        } else if(action==UI349_SPECIES_BACK) { g_ui349.species_picker=false; s_sel_us=now; }
+        else if(action==UI349_SPECIES_PREV){if(g_ui349.species_page>0)g_ui349.species_page--;s_sel_us=now;}
+        else if(action==UI349_SPECIES_NEXT){int n=0;for(int i=0;i<SPECIES_COUNT;i++)if(tank_species_allowed(t->habitat,i))n++;if((g_ui349.species_page+1)*6<n)g_ui349.species_page++;s_sel_us=now;}
+        else if(action>=UI349_SPECIES_PICK && action<UI349_SPECIES_PICK+SPECIES_COUNT) {
+            if(tank_species_allowed(t->habitat,action-UI349_SPECIES_PICK) && tank_set_species(t,s_sel,action-UI349_SPECIES_PICK)) {
+                progression_save(t); s_sel_us=now;
+                ESP_LOGI(TAG,"species: %s -> %s",t->fish[s_sel].name,TANK_SPECIES[action-UI349_SPECIES_PICK].name);
+            }
+            g_ui349.species_picker=false;
+        }
+        else if(action==UI349_TANKS) {g_ui349.slots_picker=true;g_ui349.slot_error=false;}
+        else if(action==UI349_UNDO)s_slot_request=-2;
+        else if(action==UI349_TANKS_BACK) g_ui349.slots_picker=false;
+        else if(action==UI349_TANK_STYLE) {g_ui349.slots_picker=false;g_ui349.habitat_picker=true;}
+        else if(action>=UI349_SLOT_PICK&&action<UI349_SLOT_PICK+3) s_slot_request=action-UI349_SLOT_PICK;
+        else if(action==UI349_HABITAT) g_ui349.habitat_picker=true;
+        else if(action==UI349_HABITAT_BACK) g_ui349.habitat_picker=false;
+        else if(action>=UI349_HABITAT_PICK && action<UI349_HABITAT_PICK+HABITAT_COUNT) {
+            t->habitat=action-UI349_HABITAT_PICK;
+            progression_save(t);g_ui349.habitat_picker=false;
+            ESP_LOGI(TAG,"habitat: %s",HABITAT_NAMES[t->habitat]);
+        }
+        else if (action == UI349_NEXT && setup_active()) setup_activate(t, SETUP_HIT_NEXT);
+        else if (action == UI349_CLOSE && !setup_active() && !touch_port_confirm_up()) {
+            if (s_ms) progression_ack_milestones(t);
+            touch_port_dismiss(); notice_dismiss();
+        }
+        return;
+    }
+    if (g_ui349.positioning) mapped_y = TANK_H - 4; /* placement's drag zone, never its menu hit boxes */
+    float tx = touched ? mapped_x : s_lx;
+    float ty = touched ? mapped_y - s_bias_y : s_ly;
+#else
     if (!s_tp) return;
     uint16_t x[1], y[1], st[1]; uint8_t n = 0;
     esp_lcd_touch_read_data(s_tp);
@@ -89,10 +183,15 @@ void touch_port_poll(tank_t *t) {
      * flipped screen: mirror both, so downstream gestures live in displayed space */
     float tx = touched ? (s_inverted ? (float)y[0] : (float)(TANK_W - 1 - y[0])) : s_lx;
     float ty = touched ? (s_inverted ? (float)(TANK_H - 1 - x[0]) : (float)x[0]) - s_bias_y : s_ly;
+#endif
     if (touched && ty < 0) ty = 0;
     if (touched && !s_down) {
         audio_port_prewarm();                   /* the release's cue plays warm */
         s_press_us = now; s_px = tx; s_py = ty;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        s_press_world = ui349_world_view(&g_ui349);
+        s_trimmed = false;
+#endif
         /* snapshot the school: the user aims at where a fish WAS - by release
            a darting fish has moved and the finger hid it the whole time */
         for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y; }
@@ -117,6 +216,9 @@ void touch_port_poll(tank_t *t) {
     }
     bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat;      /* a page or a prompt owns the glass */
     if (touched) { s_lx = tx; s_ly = ty; if (!modal) tank_touch_drag(t, tx, ty); }  /* stroke = wipe/slash */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    if (touched && !modal && t->slash_engaged) s_trimmed = true;
+#endif
     /* tap-and-hold on a decoration (2026-09-24, Strato: "right now it's like 5
        taps to get back to the edit"): a still finger 700 ms on an owned
        piece opens its placement page (MOVE / DEPTH / SELL) right there */
@@ -131,6 +233,9 @@ void touch_port_poll(tank_t *t) {
            back to the PRESS position here, so dx/dy were always 0 - every
            quick swipe read as a tap and the drag-feed could never fire) */
         float dx = s_lx - s_px, dy = s_ly - s_py;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        if (s_trimmed) goto released; /* Scissors cannot also tap or drag-feed. */
+#endif
         if (s_cf) {                     /* the prompt owns the glass: a press AND release on the
                                            same button answers it, nothing else counts - not
                                            even the tap that opened it (it began before) */
@@ -146,7 +251,11 @@ void touch_port_poll(tank_t *t) {
             s_sel = -1; goto released;
         }
         if (s_bat) { s_bat = false; ESP_LOGI(TAG, "battery page closed"); goto released; }   /* any release closes it */
+        #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        if (ui349_tap(s_press_world, modal, now - s_press_us, dx, dy)) {
+#else
         if (now - s_press_us < 350000 && dx * dx + dy * dy < 24 * 24) {
+#endif
             if (notice_current()) { notice_dismiss(); ESP_LOGI(TAG, "tap closed the announcement"); goto released; }
             if (s_set || s_back) { s_back = false; goto released; }   /* the settings page had the glass (render_settings_touch above) */
             if (s_shop) {                                           /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
@@ -208,6 +317,9 @@ released:
     if (!touched) s_held_page = false;
     s_down = touched;
     if (s_sel >= t->n_fish && s_sel != RENDER_CARD_SNAIL && s_sel != RENDER_CARD_SHRIMP) s_sel = -1;   /* fresh tank / save load */
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    if(g_ui349.species_picker && s_sel>=0) s_sel_us=now;
+#endif
     if (s_sel >= 0 && now - s_sel_us > 10 * 1000000) s_sel = -1; /* auto-dismiss */
     if (s_bat && now - s_bat_us > BATTERY_PAGE_US) s_bat = false; /* the battery page too, after a while */
 }
@@ -245,3 +357,8 @@ int  touch_port_take_shop(void) { int r = s_shop_act; s_shop_act = 0; return r; 
 void touch_port_set_pill(bool up) { s_pill = up; }
 bool touch_port_battery(void) { return s_bat; }
 void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_timer_get_time(); s_sel = -1; } }
+
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+int touch_port_take_slot(void){int s=s_slot_request;s_slot_request=-1;return s;}
+void touch_port_slot_changed(void){touch_port_dismiss();s_down=false;s_held_page=false;s_trimmed=false;s_cf=false;s_cf_ans=0;s_back=false;}
+#endif

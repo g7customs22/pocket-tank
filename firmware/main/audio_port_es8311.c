@@ -13,14 +13,25 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include <string.h>
+#include "sdkconfig.h"
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+#include "board_waveshare_349_v1.h"
+#endif
 
 static const char *TAG = "audio";
 
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+#define PIN_I2S_MCLK  7
+#define PIN_I2S_BCLK  15
+#define PIN_I2S_WS    46
+#define PIN_I2S_DOUT  45
+#else
 #define PIN_I2S_MCLK  16
 #define PIN_I2S_BCLK  9
 #define PIN_I2S_WS    45
 #define PIN_I2S_DOUT  8        /* ESP -> codec DSDIN */
 #define PIN_AMP_EN    46       /* NS4150B CTRL, 10k pulldown on the board */
+#endif
 #define BLOCK         160      /* 10 ms at 16 kHz */
 #define IDLE_US       (2 * 1000000LL)
 #define CODEC_RAIL    "aldo1"  /* A3V3: the codec's AVDD + the mic */
@@ -49,7 +60,20 @@ static int64_t s_idle_us = 5 * 1000000LL;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on); }
+static void amp(bool on) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    ESP_ERROR_CHECK(board_349_v1_output(V1_EX_AMP, on));
+#else
+    gpio_set_level(PIN_AMP_EN, on);
+#endif
+}
+static void codec_rail(bool on) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    (void)on; /* V1 codec supplies are fixed; codec_port gates its internals. */
+#else
+    battery_port_set_rail(CODEC_RAIL, on);
+#endif
+}
 
 /* Deep sleep (2026-09-16, the night the tank died): the I2S lines and the
  * amp's CTRL are the ESP's outputs into ICs that stay powered on VCC3V3 all
@@ -62,7 +86,11 @@ static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on); }
  * held. The codec is already down (audio_port_sleep) and the wake is a
  * reboot; audio_port_init releases the holds before the drivers claim the
  * pins again. */
-static const gpio_num_t QUIET_PINS[] = { PIN_I2S_MCLK, PIN_I2S_BCLK, PIN_I2S_WS, PIN_I2S_DOUT, PIN_AMP_EN };
+static const gpio_num_t QUIET_PINS[] = { PIN_I2S_MCLK, PIN_I2S_BCLK, PIN_I2S_WS, PIN_I2S_DOUT,
+#ifndef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    PIN_AMP_EN
+#endif
+};
 void audio_port_deep_sleep_pins(void) {
     for (size_t i = 0; i < sizeof QUIET_PINS / sizeof QUIET_PINS[0]; i++) {
         gpio_num_t p = QUIET_PINS[i];
@@ -85,7 +113,7 @@ static void write_silence(int ms) {
 /* power up: rail -> clocks -> codec -> zeros -> amp (pops stay inside) */
 static void bring_up(void) {
     int64_t t0 = esp_timer_get_time();
-    battery_port_set_rail(CODEC_RAIL, true);
+    codec_rail(true);
     vTaskDelay(pdMS_TO_TICKS(5));
     i2s_channel_enable(s_tx);                 /* MCLK/BCLK/LRCK running before the CSM starts */
     bool ok = codec_port_up();
@@ -103,7 +131,7 @@ static void bring_down(void) {
     write_silence(10);
     i2s_channel_disable(s_tx);
     codec_port_down();
-    battery_port_set_rail(CODEC_RAIL, false);
+    codec_rail(false);
     s_up = false;
     ESP_LOGI(TAG, "down (idle)");
 }
@@ -150,8 +178,11 @@ bool audio_port_init(i2c_master_bus_handle_t bus) {
     size_t bank_bytes = (size_t)(_binary_sounds_bin_end - _binary_sounds_bin_start);
     if (bank_bytes != SND_BANK_BYTES) { ESP_LOGW(TAG, "bank is %u bytes, sounds.h says %u: rebuild (tools/make_sounds.py build) - silent", (unsigned)bank_bytes, (unsigned)SND_BANK_BYTES); return false; }
     if (!codec_port_present()) { ESP_LOGW(TAG, "no ES8311: silent"); return false; }
+#ifndef CONFIG_POCKET_TANK_WAVESHARE_349_V1
     gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT, .pull_down_en = GPIO_PULLDOWN_ENABLE };
-    gpio_config(&io); amp(false);
+    gpio_config(&io);
+#endif
+    amp(false);
     i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     cc.dma_desc_num = 4; cc.dma_frame_num = BLOCK;
     if (i2s_new_channel(&cc, &s_tx, NULL) != ESP_OK) { ESP_LOGE(TAG, "no I2S channel"); return false; }

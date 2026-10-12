@@ -89,7 +89,7 @@ void render_set_card_cache(uint16_t *buf);
  * below and to the left) opens the battery page - while the pill shows. */
 #define RENDER_BAT_W 32
 #define RENDER_BAT_H 15
-#define RENDER_BAT_X (TANK_W - RENDER_BAT_W - 28)     /* clear of the curved bezel; the bolt sits left of it */
+#define RENDER_BAT_X (TANK_UI_W - RENDER_BAT_W - 28)     /* clear of the curved bezel; the bolt sits left of it */
 #define RENDER_BAT_Y 8
 #define RENDER_BAT_HIT(x, y) ((x) >= RENDER_BAT_X - 44 && (y) < RENDER_BAT_Y + RENDER_BAT_H + 40)
 void render_battery(uint16_t *fb, int stride, float frac, int state, float clock);
@@ -148,7 +148,7 @@ void render_milestones_leave(void);
  * to the milestones page, 2026-09-16),
  * SHOP_TAP_KEPT when a modal opened or closed. Page state is render-local;
  * render_shop_leave clears it when the page closes. */
-enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_SELL = 64 };   /* BUY / MOVE / SELL + item index */
+enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 64, SHOP_TAP_SELL = 128 };   /* BUY / MOVE / SELL + item index */
 /* SHOP_TAP_SELL (2026-09-24): an owned placeable piece's modal has SELL next
  * to MOVE; the first tap arms it ("+30 OK?"), the second returns SELL + item
  * and the platform calls progression_sell. Test SELL before MOVE before BUY. */
@@ -231,5 +231,11 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
 /* the same, but AS THE FISH IS: its own stage (a fry shows no markings yet,
  * an elder its long tail), calm and fed - the birth flow's portrait */
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float clock);
+
+/* Preferred top edge for reading an open information panel; -1 if closed. */
+int render_milestones_focus(void);
+int render_shop_focus(void);
+
+void render_extra_preview(uint16_t *fb,int stride,int item,int x,int y,float clock);
 
 #endif

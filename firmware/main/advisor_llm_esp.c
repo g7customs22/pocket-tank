@@ -121,3 +121,18 @@ goal_t advisor_llm_esp(const tank_t *t, int fish_idx, bool request) {
 void advisor_llm_esp_stats(uint32_t *decisions, uint32_t *last_ms, float *tok_s) {
     *decisions = g_decisions; *last_ms = g_last_ms; *tok_s = g_tok_s;
 }
+
+bool advisor_llm_esp_quiesce(void) {
+    if (!g_ok) return true;
+    int64_t end=esp_timer_get_time()+10000000;
+    do {
+        xSemaphoreTake(g_mx,portMAX_DELAY);
+        memset(g_pending,0,sizeof g_pending);
+        bool idle=!g_busy && g_req_fish<0;
+        if(idle){g_resp_fish=-1;g_next=0;}
+        xSemaphoreGive(g_mx);
+        if(idle)return true;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    } while(esp_timer_get_time()<end);
+    return false;
+}

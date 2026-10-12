@@ -33,7 +33,12 @@
  * SAVE LAYOUT LOCK (progression.c): every keeper's tank is stored under
  * these two names, so renaming either loses it at the next update.
  * --selftest-saves pins the spelling. */
-#define SAVE_NVS_NS  "tank"
+#ifdef POCKET_TANK_WIDE_V1
+#define SAVE_NVS_NS "tw50" /* Expansion save; import tw49 once and retain it for rollback. */
+#else
+#define SAVE_NVS_NS "tank"
+
+#endif
 #define SAVE_NVS_KEY "save"
 bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob, whatever length an older
                                                             * build wrote (*got = it); a NEWER build's longer one
@@ -226,6 +231,7 @@ const char *const *progression_sd_earn_lines(void);
  * -DPOP_CAP=5, the sim shows all 6. Never above N_FISH_MAX. */
 #ifndef POP_CAP
 #define POP_CAP N_FISH_MAX
+
 #endif
 
 /* stage thresholds, in seconds of grown life: awake time in full (the light
@@ -246,4 +252,31 @@ const char *const *progression_sd_earn_lines(void);
 /* milestone labels (UI / logs); order = bit order in tank.h */
 extern const char *const MS_NAMES[MS_FISH_COUNT];
 extern const char *const TMS_NAMES[TMS_COUNT];
+
+typedef struct {
+    float s_age[N_FISH_MAX];
+    uint32_t s_loaded_release;
+    float s_since_save;
+    float s_dirty_since;
+    bool s_dirty;
+    bool s_ravenous;
+    float s_ravenous_t;
+    int s_rav_feedings0;
+    bool s_arrival_pending;
+    float s_spawn_in;
+    bool s_prev_night;
+    bool s_booted;
+    bool s_setup_pending;
+    int s_newborn;
+    int s_sd_pending;
+    int32_t s_sd_prev_feedings;
+    float s_breed_ready,s_breed_cool;
+    int32_t s_prev_trims,s_prev_cleaned;
+} progression_context_t;
+void progression_context_capture(progression_context_t *out);
+void progression_context_restore(const progression_context_t *in);
+
+#define BREED_READY_S 900.0f
+#define BREED_COOLDOWN_S 21600.0f
+bool progression_breed_pair(const tank_t *t,int *a,int *b);
 #endif

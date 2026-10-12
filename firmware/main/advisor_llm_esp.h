@@ -13,4 +13,5 @@ bool   advisor_llm_esp_init(const uint8_t *model_bin, size_t model_len,
 goal_t advisor_llm_esp(const tank_t *t, int fish_idx, bool request);
 /* stats for the log: decisions made, last decision latency (ms), tokens/s */
 void   advisor_llm_esp_stats(uint32_t *decisions, uint32_t *last_ms, float *tok_s);
+bool advisor_llm_esp_quiesce(void);
 #endif

@@ -273,7 +273,7 @@ int setup_hit(float x, float y) {
         }
         /* the DEPTH bar: a band 8 px around it, the segment under the finger
            (the item's own depths: the plant's three, the castle's two) */
-        int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (TANK_W - bw) / 2;
+        int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (TANK_UI_W - bw) / 2;
         if (!in_box(x, y, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, 8)) return 0;
         int i = (int)((x - bx) / SETUP_DEPTH_SEG_W);
         if (i < 0) i = 0;
@@ -396,7 +396,7 @@ static void nav(uint16_t *fb, int stride, bool top, const char *next_label, bool
 static void dots(uint16_t *fb, int stride, int y) {
     if (s_place) return;                                /* one page: nothing to count */
     int n = s_birth ? SETUP_BIRTH_PAGES : SETUP_PG_N, cur = s_page - first_page();
-    int w = n * 10 - 4, x0 = (TANK_W - w) / 2;
+    int w = n * 10 - 4, x0 = (TANK_UI_W - w) / 2;
     for (int i = 0; i < n; i++) render_rect(fb, stride, x0 + i * 10, y, 6, 3, i == cur ? C_EDGE : C_DIM);
 }
 /* a caption with a name in it, the name in its own colour: `pre` NAME `post` */
@@ -472,6 +472,12 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
     const int cx = x + w / 2, cy = y + h / 2, lh = h - 6, yb = y + h - 3;
     const uint32_t la = 0x8dbb48, lb = 0x6c9d38;
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
+    if(item>=EXTRA_DECOR_FIRST) {
+        if(z==DECOR_Z_BACK) render_extra_preview(fb,stride,item,cx-12,yb,clock);
+        if(who) render_fish_portrait(fb,stride,(float)(cx+18),(float)cy,.62f,who,clock);
+        if(z!=DECOR_Z_BACK) render_extra_preview(fb,stride,item,cx-12,yb,clock);
+        return;
+    }
     if (item == 2) {
         if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
         leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
@@ -515,7 +521,7 @@ static void panel(uint16_t *fb, int stride) {
 
 void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
     if (!s_active) return;
-    const int CX = TANK_W / 2;
+    const int CX = TANK_UI_W / 2;
     if (s_page == SETUP_PG_WELCOME) {
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + 36, 3, C_TEXT, "WELCOME");
@@ -557,7 +563,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         static const char *const castle_hint[DECOR_Z_N] = { "THE PLANTS GROW IN FRONT OF IT", "", "IT STANDS IN FRONT OF THE PLANTS" };
         static const char *const coral_hint[DECOR_Z_N] = { "BEHIND THE GRASS AND THE FISH", "", "IN FRONT OF EVERYTHING" };
         int z = tank_decor_z(t, s_item), zi = tank_decor_z_index(s_item, z);
-        int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (TANK_W - bw) / 2;   /* the item's own depths */
+        int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (TANK_UI_W - bw) / 2;   /* the item's own depths */
         text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "DEPTH");
         render_rect(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_KEY);
         for (int i = 0; i < n; i++) {
@@ -573,7 +579,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             /* the cluster: a LOOK row of three tiles - the coral, the tubes and
                the brain as three bands over the look's name - the pick ringed */
             int look = tank_cluster_scheme(t);
-            render_rect_blend(fb, stride, 0, SETUP_LOOK_Y - 22, TANK_W, SETUP_LOOK_H + 30, C_PANEL, 110);
+            render_rect_blend(fb, stride, 0, SETUP_LOOK_Y - 22, TANK_UI_W, SETUP_LOOK_H + 30, C_PANEL, 110);
             render_text(fb, stride, SETUP_LOOK_X + 2, SETUP_LOOK_Y - 18, 2, C_CAPT, "LOOK");
             for (int i = 0; i < SETUP_LOOK_N; i++) {
                 int x = SETUP_LOOK_X + i * SETUP_LOOK_PX; bool on = i == look;
@@ -592,7 +598,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
                page's swatches, shorter), the pick ringed, the hint under the
                row's caption */
             uint32_t rgb = tank_coral_rgb(t);
-            render_rect_blend(fb, stride, 0, SETUP_COL_Y - 22, TANK_W, SETUP_COL_H + 30, C_PANEL, 110);   /* a band the swatches read on, like the colour page's */
+            render_rect_blend(fb, stride, 0, SETUP_COL_Y - 22, TANK_UI_W, SETUP_COL_H + 30, C_PANEL, 110);   /* a band the swatches read on, like the colour page's */
             render_text(fb, stride, SETUP_COL_X + 2, SETUP_COL_Y - 18, 2, C_CAPT, "COLOR");
             (void)coral_hint;
             for (int i = 0; i < SETUP_COL_N; i++) {
@@ -607,6 +613,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         if (s_item == 0) tank_veg_bed(t, 3, NULL, NULL, &top, NULL);   /* the leaves' reach */
         if (s_item == 2) top = TANK_H - 16 - 146;                      /* the tallest spire */
         if (s_item == 3) top = TANK_H - 14 + DECOR_SINK - 92;          /* the coral's top tip */
+        if (s_item >= EXTRA_DECOR_FIRST) top = TANK_H-110;
         if (s_item == 4) top = TANK_H - 14 + DECOR_SINK - 120;         /* the cluster's tallest tube */
         int sy = (int)top - 8; if (sy < place_y()) sy = place_y();
         render_rect_blend(fb, stride, (int)x0, sy, (int)(x1 - x0), TANK_H - 16 - sy + 4, C_EDGE, 46);
@@ -655,7 +662,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
            blank are just faint underlines */
         const fish_t *f = &t->fish[page_fish()];
         render_ring(fb, stride, f->x, f->y, 17 * f->size + 6, f->color);
-        render_rect_blend(fb, stride, 0, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, TANK_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
+        render_rect_blend(fb, stride, 0, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, TANK_UI_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
         text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
         nav(fb, stride, true, "NEXT", false);
         int n = name_len(f);
@@ -681,7 +688,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
            accent a "?" that its first growth spurt answers */
         const fish_t *f = &t->fish[page_fish()];
         render_ring(fb, stride, f->x, f->y, 17 * f->size + 6, f->color);
-        render_rect_blend(fb, stride, 0, SETUP_SW_Y - 30, TANK_W, SETUP_ACC_Y + SETUP_SW_H + 16 - (SETUP_SW_Y - 30), C_PANEL, 110);
+        render_rect_blend(fb, stride, 0, SETUP_SW_Y - 30, TANK_UI_W, SETUP_ACC_Y + SETUP_SW_H + 16 - (SETUP_SW_Y - 30), C_PANEL, 110);
         char cap[FISH_NAME_MAX + 16]; snprintf(cap, sizeof cap, "A COLOR FOR %s", f->name);
         text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, cap);
         nav(fb, stride, true, "NEXT", false);
@@ -708,7 +715,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         float r = 17 * f->size + 6 + 3 * sinf(clock * 3);          /* a ring that breathes */
         render_ring(fb, stride, f->x, f->y, r, f->color);
         render_ring(fb, stride, f->x, f->y, r + 8, C_EDGE);
-        render_rect_blend(fb, stride, 0, 92, TANK_W, 116, C_PANEL, 150);
+        render_rect_blend(fb, stride, 0, 92, TANK_UI_W, 116, C_PANEL, 150);
         text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
         char l1[FISH_NAME_MAX * 2 + 24];
         snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));

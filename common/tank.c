@@ -55,7 +55,10 @@ float tank_dist(float ax, float ay, float bx, float by) {
 
 int tank_nearest_food(const tank_t *t, const fish_t *f, float *dist_out) {
     int best = -1; float bd = 1e9f;
+    bool floor_food=false;
+    if(f->species==SPECIES_CORY)for(int i=0;i<MAX_FOOD;i++)if(t->food[i].alive&&t->food[i].y>=FOOD_FLOOR_Y-2)floor_food=true;
     for (int i = 0; i < MAX_FOOD; i++) {
+        if(floor_food&&t->food[i].y<FOOD_FLOOR_Y-2)continue;
         if (!t->food[i].alive) continue;
         float d = tank_dist(f->x, f->y, t->food[i].x, t->food[i].y);
         if (d < bd) { bd = d; best = i; }
@@ -148,8 +151,10 @@ void tank_fish_face(fish_t *f) {
 }
 
 void tank_make_fish(tank_t *t, int slot, int preset, float sociable, float bold, stage_t stage) {
+    t->fish_species[slot]=t->habitat==HABITAT_REEF?SPECIES_CLOWN:t->habitat==HABITAT_FRESH?SPECIES_NEON:SPECIES_CLASSIC;
     fish_t *f = &t->fish[slot];
     const preset_t *p = &ROSTER[preset];
+    f->species=t->fish_species[slot];
     f->preset = preset; tank_set_name(t, slot, p->name);
     f->model_name = TRAINED_NAMES[slot % N_TRAINED_NAMES];   /* names carry no signal */
     f->x = tank_randf(t, 90, TANK_W - 90); f->y = tank_randf(t, 80, TANK_H - 90);
@@ -230,6 +235,7 @@ int tank_add_fish(tank_t *t, int parent_a, int parent_b) {
        which; tank_set_look keeps the markings off a matching body */
     if (tank_randf(t, 0, 1) < 0.5f) { int x = ia; ia = ib; ib = x; pa = &t->fish[ia]; pb = &t->fish[ib]; }
     tank_set_look(t, slot, pa->color, pb->accent);
+    t->fish[slot].species=t->fish_species[slot]=pa->species;
     t->fish[slot].parent_a = (int8_t)ia; t->fish[slot].parent_b = (int8_t)ib;
     place_near_reef(t, &t->fish[slot]);
     t->fish[slot].hunger = 4; t->fish[slot].trust = 4;
@@ -523,6 +529,23 @@ static bool veg_near_frond(const tank_t *t, int b, float x, float y, float side,
     }
     return false;
 }
+#ifdef POCKET_TANK_WIDE_V1
+/* A sparse touch sample can cross a whole bed. Test the segment, not only
+ * its endpoint, so a sideways swipe can enter grass from empty glass. */
+static bool veg_segment_near(const tank_t *t, float x0, float y0, float x1, float y1) {
+    float lo = fminf(x0, x1), hi = fmaxf(x0, x1);
+    for (int b = 0; b < tank_veg_beds(t); b++) {
+        int n; tank_veg_bed(t, b, NULL, NULL, NULL, &n);
+        for (int i = 0; i < n; i++) {
+            float fx; int segs = tank_veg_frond(t, b, i, &fx);
+            if (fx < lo - SLASH_START_SIDE_PX || fx > hi + SLASH_START_SIDE_PX) continue;
+            float u = fabsf(x1-x0) > 0.001f ? clampf((fx-x0)/(x1-x0), 0, 1) : 0;
+            if (y0 + (y1-y0)*u >= TANK_H - 16 - segs*VEG_SEG_PX - SLASH_START_PX) return true;
+        }
+    }
+    return false;
+}
+#endif
 static bool veg_inside(const tank_t *t, int b, float x, float y) {
     float x0, x1, ty;
     tank_veg_bed(t, b, &x0, &x1, &ty, NULL);
@@ -640,10 +663,12 @@ static void wipe_algae(tank_t *t, float x0, float y0, float x1, float y1) {
         for (int cx = 0; cx < ALGAE_COLS; cx++) {
             uint8_t *cell = &t->algae[cy * ALGAE_COLS + cx];
             if (!*cell) continue;
-            float px = cx * ALGAE_CELL + ALGAE_CELL * 0.5f;
+            float px = cx * ALGAE_CELL_X + ALGAE_CELL_X * 0.5f;
             float py = cy * ALGAE_CELL + ALGAE_CELL * 0.5f;
             float u = len2 > 1 ? clampf(((px - x0) * dx + (py - y0) * dy) / len2, 0, 1) : 0;
-            if (tank_dist(px, py, x0 + dx * u, y0 + dy * u) < WIPE_RADIUS) {
+            float wx = fmaxf(0, fabsf(px - (x0 + dx * u)) - (ALGAE_CELL_X - ALGAE_CELL) * 0.5f);
+            float wy = py - (y0 + dy * u);
+            if (wx * wx + wy * wy < WIPE_RADIUS * WIPE_RADIUS) {
                 if (patches < 0) patches = algae_label(t->algae, lab);
                 *cell = 0;
                 t->cells_cleaned++; wiped++;
@@ -680,7 +705,7 @@ static int snail_nearest_cell(const tank_t *t) {
     int best = -1; float bd = 1e9f;
     for (int i = 0; i < ALGAE_CELLS; i++) {
         if (!t->algae[i]) continue;
-        float cx = (i % ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f, cy = (i / ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f;
+        float cx = (i % ALGAE_COLS) * ALGAE_CELL_X + ALGAE_CELL_X * 0.5f, cy = (i / ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f;
         float d = tank_dist(t->snail_x, t->snail_y, cx, cy);
         if (d < bd) { bd = d; best = i; }
     }
@@ -700,7 +725,7 @@ static void snail_tick(tank_t *t, float dt) {
     if (t->snail_x < 0) tank_snail_place(t);
     if (t->snail_cell < 0 || !t->algae[t->snail_cell]) { t->snail_cell = (int16_t)snail_nearest_cell(t); t->snail_graze = 0; }
     if (t->snail_cell >= 0) {
-        float cx = (t->snail_cell % ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f;
+        float cx = (t->snail_cell % ALGAE_COLS) * ALGAE_CELL_X + ALGAE_CELL_X * 0.5f;
         float cy = (t->snail_cell / ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f;
         float tx = clampf(cx, SNAIL_MARGIN, TANK_W - SNAIL_MARGIN), ty = clampf(cy, SNAIL_MARGIN, TANK_H - SNAIL_MARGIN);
         float d = tank_dist(t->snail_x, t->snail_y, tx, ty);      /* to the nearest point it may stand on */
@@ -742,7 +767,7 @@ static void snail_sleep(tank_t *t, float seconds) {
         int c = snail_nearest_cell(t);
         if (c < 0) break;
         t->algae[c] = 0; t->snail_grazed++;
-        t->snail_x = clampf((c % ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f, SNAIL_MARGIN, TANK_W - SNAIL_MARGIN);
+        t->snail_x = clampf((c % ALGAE_COLS) * ALGAE_CELL_X + ALGAE_CELL_X * 0.5f, SNAIL_MARGIN, TANK_W - SNAIL_MARGIN);
         t->snail_y = clampf((c / ALGAE_COLS) * ALGAE_CELL + ALGAE_CELL * 0.5f, SNAIL_MARGIN, TANK_H - SNAIL_MARGIN);
     }
     t->snail_cell = -1;
@@ -968,8 +993,8 @@ static void cluster_grow(tank_t *t, float seconds) {
 }
 void     tank_coral_set_rgb(tank_t *t, uint32_t rgb) { t->coral_rgb = rgb & 0xffffff; }
 /* the decor's spot and layer (see tank.h): item 0 is the plant, item 2 the castle, item 3 the coral, item 4 the cluster */
-bool  tank_decor_placeable(int item) { return item == 0 || item == 2 || item == 3 || item == 4; }
-float tank_decor_half_w(int item) { return item == 0 ? PLANT_HALF_W : item == 2 ? CASTLE_HALF_W : item == 3 ? CORAL_HALF_W : item == 4 ? CLUSTER_HALF_W : 0; }
+bool  tank_decor_placeable(int item) { return item == 0 || item == 2 || item == 3 || item == 4 || (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT); }
+float tank_decor_half_w(int item) { if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) return item >= 9 ? 38 : 30; return item == 0 ? PLANT_HALF_W : item == 2 ? CASTLE_HALF_W : item == 3 ? CORAL_HALF_W : item == 4 ? CLUSTER_HALF_W : 0; }
 /* only the plant weaves AMONG the fish; the castle and both corals are
  * BEHIND or IN FRONT (Strato, 2026-09-24: "remove the among option for
  * corals, it doesn't really make as much sense") */
@@ -980,31 +1005,39 @@ int   tank_decor_z_at(int item, int i) {
 }
 int   tank_decor_z_index(int item, int z) { return item != 0 ? (z == DECOR_Z_BACK ? 0 : 1) : z; }
 float tank_decor_x(const tank_t *t, int item) {
+    if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) {
+        float x=t->extra_decor_x[item-EXTRA_DECOR_FIRST];
+        return x>0 ? x : TANK_W*(0.15f+0.14f*((item-EXTRA_DECOR_FIRST)%6));
+    }
     if (item == 2) return t->castle_x > 0 ? t->castle_x : CASTLE_X_DEFAULT;
     if (item == 3) return t->coral_x > 0 ? t->coral_x : CORAL_X_DEFAULT;
     if (item == 4) return t->cluster_x > 0 ? t->cluster_x : CLUSTER_X_DEFAULT;
     if (item != 0) return 0;
     return t->plant_x > 0 ? t->plant_x : PLANT_X_DEFAULT;
 }
-int tank_decor_z(const tank_t *t, int item) { return item == 0 ? t->plant_z : item == 2 ? t->castle_z : item == 3 ? t->coral_z : item == 4 ? t->cluster_z : DECOR_Z_MIDDLE; }
+int tank_decor_z(const tank_t *t, int item) { if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) return t->extra_decor_z[item-EXTRA_DECOR_FIRST]; return item == 0 ? t->plant_z : item == 2 ? t->castle_z : item == 3 ? t->coral_z : item == 4 ? t->cluster_z : DECOR_Z_MIDDLE; }
 static float decor_top(const tank_t *t, int item) {         /* the piece's highest pixel */
+    if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) return TANK_H-110;
     if (item == 0) { float top; tank_veg_bed(t, 3, NULL, NULL, &top, NULL); return top; }
     if (item == 2) return TANK_H - 16 - 146;
     if (item == 3) return TANK_H - 14 + DECOR_SINK - 92;
     return TANK_H - 14 + DECOR_SINK - 120;
 }
 int tank_decor_hit(const tank_t *t, float x, float y) {
-    static const int order[4] = { 3, 0, 2, 4 };               /* the coral, the plant, the castle, the cluster */
-    static const uint32_t bits[5] = { SD_ITEM_PLANT, 0, SD_ITEM_CASTLE, SD_ITEM_CORAL, SD_ITEM_CLUSTER };
-    for (int k = 0; k < 4; k++) {
+    static const int order[9] = { 6, 7, 8, 9, 10, 3, 0, 2, 4 };               /* the coral, the plant, the castle, the cluster */
+    for (int k = 0; k < 9; k++) {
         int item = order[k];
-        if (!(t->sd_unlocks & bits[item])) continue;
+        if (!(t->sd_unlocks & (1u<<item))) continue;
         float cx = tank_decor_x(t, item), half = tank_decor_half_w(item) + 8;
         if (x >= cx - half && x <= cx + half && y >= decor_top(t, item) - 8 && y <= TANK_H) return item;
     }
     return -1;
 }
 void tank_decor_reset(tank_t *t, int item) {
+    if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) {
+        t->extra_decor_x[item-EXTRA_DECOR_FIRST]=0;
+        t->extra_decor_z[item-EXTRA_DECOR_FIRST]=DECOR_Z_BACK;
+    }
     if (item == 0) { t->plant_x = 0; t->plant_z = DECOR_Z_MIDDLE; tank_veg_set(t, 3, VEG_START); }
     if (item == 2) { t->castle_x = 0; t->castle_z = DECOR_Z_FRONT; }
     if (item == 3) { t->coral_x = 0; t->coral_z = DECOR_Z_FRONT; t->coral_rgb = 0; t->coral_growth = 0; t->coral_acc = 0; }
@@ -1018,6 +1051,10 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (z < 0) z = 0;
     if (z >= DECOR_Z_N) z = DECOR_Z_N - 1;
     uint8_t z2 = (uint8_t)(z == DECOR_Z_BACK ? DECOR_Z_BACK : DECOR_Z_FRONT);   /* no AMONG for these */
+    if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) {
+        t->extra_decor_x[item-EXTRA_DECOR_FIRST]=x;
+        t->extra_decor_z[item-EXTRA_DECOR_FIRST]=z2; return;
+    }
     if (item == 2) { t->castle_x = x; t->castle_z = z2; return; }
     if (item == 3) { t->coral_x = x; t->coral_z = z2; return; }
     if (item == 4) { t->cluster_x = x; t->cluster_z = z2; return; }
@@ -1033,11 +1070,12 @@ void tank_touch_drag(tank_t *t, float x, float y) {
     tank_handled(t);
     t->drag_active = true;
     if (!t->drag_has_prev) {
-        /* stroke start: a slash must BEGIN on a plant - within SLASH_START_PX
+        /* stroke start: arm immediately on a plant - within SLASH_START_PX
          * of an actual frond (beside its spine, no higher than its tip). A
          * cleaning scrub that starts mid-glass, even straight above a tall
          * bed, and then works down through the grass arms nothing: it keeps
-         * wiping algae and the fronds stand. */
+         * wiping algae and the fronds stand. V1 also permits a later
+         * deliberate horizontal entry (below). */
         t->slash_armed = false;
         for (int b = 0; b < tank_veg_beds(t) && !t->slash_armed; b++)
             t->slash_armed = veg_near_frond(t, b, x, y, SLASH_START_SIDE_PX, SLASH_START_PX);
@@ -1059,8 +1097,21 @@ void tank_touch_drag(tank_t *t, float x, float y) {
          * retroactively as one straight segment from the stroke start), so
          * a flick takes one or two fronds at the finger's height and a sweep
          * along the floor mows the bed to nubs. */
+#ifdef POCKET_TANK_WIDE_V1
+        t->slash_h += fabsf(sdx); t->slash_v += fabsf(sdy);
+        if (!t->slash_armed && t->slash_h >= SLASH_PX
+            && t->slash_h > SLASH_RATIO * t->slash_v
+            && fabsf(sdx) > SLASH_RATIO * fabsf(sdy)
+            && veg_segment_near(t, t->drag_px, t->drag_py, x, y)) {
+            t->slash_armed = true;
+            /* Cut only the entering segment, never a prior vertical scrub. */
+            t->slash_x0 = t->drag_px; t->slash_y0 = t->drag_py;
+        }
+#endif
         if (t->slash_armed) {
+#ifndef POCKET_TANK_WIDE_V1
             t->slash_h += fabsf(sdx); t->slash_v += fabsf(sdy);
+#endif
             int cuts = 0;
             if (!t->slash_engaged) {
                 if (t->slash_h >= SLASH_PX && t->slash_h > SLASH_RATIO * t->slash_v) {
@@ -1076,6 +1127,8 @@ void tank_touch_drag(tank_t *t, float x, float y) {
     t->drag_px = x; t->drag_py = y; t->drag_has_prev = true;
 }
 
+static bool feed_full;
+bool tank_take_feed_full(void){bool result=feed_full;feed_full=false;return result;}
 void tank_feed(tank_t *t, float x, int n) {
     tank_handled(t);
     x = clampf(x, 25, TANK_W - 25);
@@ -1088,6 +1141,7 @@ void tank_feed(tank_t *t, float x, int n) {
         t->food[i].age = 0; t->food[i].floor_s = 0; t->food[i].nibbled = 0;
         n--; dropped++;
     }
+    if(n>0)feed_full=true;
     if (dropped) tank_emit(TEV_FEED, -1);        /* the plink is for pellets, not for the tap (a full tank drops none) */
     t->feed_spot_x = t->feed_spot_x < 0 ? x : t->feed_spot_x + (x - t->feed_spot_x) * 0.3f;
     t->feed_open = true;                         /* a meal once somebody eats from it */
@@ -1142,7 +1196,9 @@ static void touch_tick(tank_t *t, float dt) {
        AUTO the idle rule owns it - 2026-09-15: the old always-on override
        rode in the save and froze a tank in permanent day) */
     if (!t->startled && t->tap_count == 2 && t->tap_burst_t > TAP_WINDOW) {
+#ifndef POCKET_TANK_WIDE_V1
         if (!t->light_auto) t->light_manual_off = !t->light_manual_off;
+#endif /* V1 uses the BOOT button; glass taps never control its light. */
         t->tap_count = 0;
     }
     if (t->tap_count >= 3 && t->tap_burst_t > TAP_WINDOW) t->tap_count = 0;
@@ -1334,7 +1390,7 @@ static target_t target_for_goal(tank_t *t, int idx, goal_id_t goal, bool glance)
         if (i >= 0) {
             const fish_t *fr = &t->fish[i];
             float ang = atan2f(f->y - fr->y, f->x - fr->x) + sinf(tm + f->wander) * 0.35f;
-            tg.x = fr->x + cosf(ang) * 54; tg.y = fr->y + sinf(ang) * 34;   /* a body length off, not on top */
+            tg.x = fr->x + cosf(ang) * (f->species==SPECIES_GOBY?22:54); tg.y = fr->y + sinf(ang) * (f->species==SPECIES_GOBY?18:34);   /* a body length off, not on top */
             tg.speed = clampf(d - 40, 10, 42);
         } else tg.valid = false;
         break;
@@ -1693,6 +1749,10 @@ static void update_fish(tank_t *t, int idx, float dt) {
     f->yaw += clampf(face - f->yaw, -yrate, yrate);
     f->yaw_tail += (f->yaw - f->yaw_tail) * clampf(dt * 10, 0, 1);
     float want = touch_speed >= 0 ? touch_speed : hes_speed >= 0 ? hes_speed : tg.speed * ugain;
+    if(touch_speed<0 && f->goal.id!=GOAL_FLEE_SHADOW && f->goal.id!=GOAL_SEEK_FOOD) {
+        static const float cruise[SPECIES_COUNT]={1,.65f,.78f,1,1.18f,.9f,1.18f,1.05f,1.3f,1.05f,.95f,.85f,.7f,.9f,1.1f,.7f,.8f,1.2f,.7f,.6f};
+        want *= cruise[f->species<SPECIES_COUNT?f->species:SPECIES_CLASSIC];
+    }
     f->target_speed = want * (f->energy < 1.2f ? 0.45f : 1) * (glancing ? 0.6f : 1);
     /* swimming through a canopy is slow going (a fleeing fish crashes through) */
     if (f->goal.id != GOAL_FLEE_SHADOW)
@@ -1711,13 +1771,14 @@ static void update_fish(tank_t *t, int idx, float dt) {
     /* hard bounds. The side glass mirrors a heading only while it points
      * INTO the glass: the facing lags the mirror, and a second bounce on the
      * next frame would send the fish back into the glass */
-    float m = 15 * f->size;
+    float m = (f->species==SPECIES_CLASSIC?15:30) * f->size;
+    float my = (f->species==SPECIES_ANGEL || f->species==SPECIES_PLECO)?38*f->size:m;
     if (f->x < m)          { f->x = m;          if (cosf(f->heading) < 0) f->heading = norm_ang(3.14159f - f->heading);
                                                 if (f->facing < 0) { f->facing = 1; f->behind = -TURN_SETTLE; } }
     if (f->x > TANK_W - m) { f->x = TANK_W - m; if (cosf(f->heading) > 0) f->heading = norm_ang(3.14159f - f->heading);
                                                 if (f->facing > 0) { f->facing = -1; f->behind = -TURN_SETTLE; } }
-    if (f->y < m)          { f->y = m;          f->heading = -f->heading; }
-    if (f->y > TANK_H - m) { f->y = TANK_H - m; f->heading = -f->heading; }
+    if (f->y < my)         { f->y = my;          f->heading = -f->heading; }
+    if (f->y > TANK_H - my) { f->y = TANK_H - my; f->heading = -f->heading; }
 
     eat_nearby_food(t, f);
 }
@@ -1749,6 +1810,41 @@ static uint32_t state_signature(const tank_t *t, int idx) {
          | (uint32_t)band3(f->bored) << 13;      /* a fish going stale is asked again (2026-09-14) */
 }
 
+bool tank_set_species(tank_t *t,int fish,int species) {
+    if(fish<0 || fish>=t->n_fish || species<0 || species>=SPECIES_COUNT) return false;
+    t->fish_species[fish]=(uint8_t)species; t->fish[fish].species=(uint8_t)species;
+    t->fish[fish].glass_attached=false; t->fish[fish].glass_graze=0;
+    return true;
+}
+/* Game presentation: calm plecos alternate short glass visits with swimming.
+ * Food, danger, keeper interactions and courtship always release them. */
+static void pleco_glass(tank_t *t,int idx,float dt,float old_x,float old_y) {
+    fish_t *f=&t->fish[idx];
+    f->glass_attached=(f->species==SPECIES_PLECO||f->species==SPECIES_BRISTLE) && f->hunger<7 && !t->hold_active &&
+        !t->startled && !t->spawning && t->stage_fish!=idx &&
+        f->goal.id!=GOAL_SEEK_FOOD && f->goal.id!=GOAL_FLEE_SHADOW &&
+        fmodf(t->clock+idx*13.0f,40.0f)<16.0f;
+    if(!f->glass_attached) { f->glass_graze=0; return; }
+    int cell=-1; float best=1e9f;
+    for(int i=0;i<ALGAE_CELLS;i++) if(t->algae[i]) {
+        float x=(i%ALGAE_COLS+.5f)*ALGAE_CELL_X, y=(i/ALGAE_COLS+.5f)*ALGAE_CELL;
+        float d=tank_dist(old_x,old_y,x,y);
+        if(d<best) { best=d; cell=i; }
+    }
+    f->x=old_x; f->y=old_y; f->speed=0; f->target_speed=0;
+    if(cell>=0) {
+        float x=(cell%ALGAE_COLS+.5f)*ALGAE_CELL_X, y=(cell/ALGAE_COLS+.5f)*ALGAE_CELL;
+        float d=fmaxf(best,1); float step=fminf(5*dt,d);
+        f->x=clampf(old_x+(x-old_x)*step/d,32,TANK_W-32);
+        f->y=clampf(old_y+(y-old_y)*step/d,32,TANK_H-32);
+        if(tank_dist(f->x,f->y,x,y)<20) {
+            f->glass_graze+=dt;
+            if(f->glass_graze>=6) { t->algae[cell]--; f->glass_graze-=6; f->hunger=clampf(f->hunger-.2f,0,10); }
+        } else f->glass_graze=0;
+    }
+    float margin=38*f->size;
+    f->x=clampf(f->x,margin,TANK_W-margin); f->y=clampf(f->y,margin,TANK_H-margin);
+}
 void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     t->clock += dt;
     /* the light: on while the device is handled, off LIGHT_IDLE_S after the
@@ -1881,10 +1977,43 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
         if (f->goal.id == GOAL_SEEK_FOOD || f->hunger < 8.0f) f->starve_flagged = false;
     }
 
-    for (int i = 0; i < t->n_fish; i++) update_fish(t, i, dt);
+    for (int i = 0; i < t->n_fish; i++) {
+        float x=t->fish[i].x,y=t->fish[i].y;
+        fish_t *f=&t->fish[i];
+        update_fish(t,i,dt);
+        pleco_glass(t,i,dt,x,y);
+        /* Stylized cleaner-goby visits soothe a nearby fish; no algae removal. */
+        if(f->species==SPECIES_GOBY && f->hunger<7 && !t->hold_active && !t->spawning && !t->startled && f->goal.id!=GOAL_SEEK_FOOD){
+            int buddy=tank_nearest_friend(t,i,NULL);fish_t *other=&t->fish[buddy>=0?buddy:i];
+            if(tank_dist(f->x,f->y,other->x,other->y)<40)other->stress=clampf(other->stress-dt*.03f,0,10);
+        }
+    }
 
     /* consume the hold AFTER the fish have seen it (the platform re-asserts
      * every frame the finger stays down). Clearing it at the top of the tick
      * was the old bug that kept the drift-to-finger reflex from ever firing. */
     t->hold_active = false;
+}
+
+/* Append-only catalog IDs. Standard retains the original mixed aquarium. */
+bool tank_item_allowed(int habitat,int item) {
+    if(item<0||item>=SD_ITEM_COUNT)return false;
+    if(habitat==HABITAT_CLASSIC)return true;
+    bool marine=item==3||item==4||item>=18;
+    bool shared=item==2||item==5||(item>=6&&item<=8);
+    return shared || (habitat==HABITAT_REEF?marine:!marine);
+}
+void tank_habitat_defaults(tank_t *t,int habitat) {
+    t->habitat=(uint8_t)habitat;
+    if(habitat==HABITAT_CLASSIC)return;
+    tank_set_species(t,0,habitat==HABITAT_FRESH?SPECIES_NEON:SPECIES_CLOWN);
+    tank_set_species(t,1,habitat==HABITAT_FRESH?SPECIES_GUPPY:SPECIES_GRAMMA);
+    tank_set_name(t,0,habitat==HABITAT_FRESH?"ripple":"coral");
+    tank_set_name(t,1,habitat==HABITAT_FRESH?"willow":"pearl");
+    const int fresh[]={11,14,15},salt[]={18,20,21};
+    const int *items=habitat==HABITAT_FRESH?fresh:salt;
+    for(int k=0;k<3;k++){
+        int item=items[k];t->sd_unlocks|=1u<<item;
+        tank_decor_set(t,item,TANK_W*(.2f+.3f*k),DECOR_Z_BACK);
+    }
 }

@@ -143,7 +143,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_SLOT_PX  44
 #define SETUP_SLOT_W   (5 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_H   (7 * SETUP_SLOT_SCALE)
-#define SETUP_SLOT_X   ((TANK_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
+#define SETUP_SLOT_X   ((TANK_UI_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
 #define SETUP_SLOT_Y   150
 #define SETUP_ARROW_GAP 40
 #define SETUP_SPIN_PX   30                                 /* drag travel per letter */
@@ -155,7 +155,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_SW_PX 46
 #define SETUP_SW_W  42
 #define SETUP_SW_H  60
-#define SETUP_SW_X  ((TANK_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
+#define SETUP_SW_X  ((TANK_UI_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
 #define SETUP_SW_Y  176
 #define SETUP_ACC_Y 276
 /* the family page (birth flow): the portrait ringed under the name, then
@@ -184,7 +184,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_DEPTH_W      (DECOR_Z_N * SETUP_DEPTH_SEG_W)      /* the plant's three segments; the castle's two (BEHIND / IN
                                                              * FRONT, Strato: no AMONG) are centred the same way - setup.c
                                                              * sizes the bar from tank_decor_z_count */
-#define SETUP_DEPTH_X      ((TANK_W - SETUP_DEPTH_W) / 2)
+#define SETUP_DEPTH_X      ((TANK_UI_W - SETUP_DEPTH_W) / 2)
 #define SETUP_DEPTH_Y      (SETUP_TOP_BTN_Y + SETUP_BTN_H + 24)
 #define SETUP_DEPTH_H      70
 #define SETUP_DEPTH_TILE_H 40
@@ -198,7 +198,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_COL_PX  SETUP_SW_PX
 #define SETUP_COL_W   SETUP_SW_W
 #define SETUP_COL_H   26
-#define SETUP_COL_X   ((TANK_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
+#define SETUP_COL_X   ((TANK_UI_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
 #define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + 22)
 #define SETUP_PLACE_CORAL_Y (SETUP_COL_Y + SETUP_COL_H + 8)
 /* the reef cluster's page (2026-09-24): a LOOK row of CLUSTER_SCHEME_N tiles
@@ -208,12 +208,12 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_LOOK_W   110
 #define SETUP_LOOK_PX  118
 #define SETUP_LOOK_H   36
-#define SETUP_LOOK_X   ((TANK_W - (SETUP_LOOK_N - 1) * SETUP_LOOK_PX - SETUP_LOOK_W) / 2)
+#define SETUP_LOOK_X   ((TANK_UI_W - (SETUP_LOOK_N - 1) * SETUP_LOOK_PX - SETUP_LOOK_W) / 2)
 #define SETUP_LOOK_Y   SETUP_COL_Y
 #define SETUP_PLACE_CLUSTER_Y (SETUP_LOOK_Y + SETUP_LOOK_H + 8)
 /* the stage: the clear spot each page leaves for the fish being edited
  * (tank_t.stage_*), top centre between the buttons */
-#define SETUP_STAGE_X   (TANK_W / 2)
+#define SETUP_STAGE_X   (TANK_UI_W / 2)
 #define SETUP_STAGE_NAME_Y 94
 #define SETUP_STAGE_LOOK_Y 112
 #endif

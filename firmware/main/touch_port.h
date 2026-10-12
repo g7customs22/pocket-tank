@@ -46,4 +46,6 @@ bool touch_port_battery(void);
 void touch_port_show_battery(bool on);
 void touch_port_set_bias(int px);              /* finger-landing correction: reported y moves up by px */
 int  touch_port_bias(void);
+int touch_port_take_slot(void);
+void touch_port_slot_changed(void);
 #endif

@@ -20,9 +20,37 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define TANK_W 448
+#define TANK_UI_W 448
+#ifdef POCKET_TANK_WIDE_V1
+#define TANK_W 1344 /* Three times the swimming area; all lengths/speeds stay in world units. */
+#else
+#define TANK_W TANK_UI_W
+#endif
 #define TANK_H 368
 
+#define EXTRA_DECOR_FIRST 6
+#define EXTRA_DECOR_COUNT 17
+#define LEGACY_EXTRA_DECOR_COUNT 5
+/* Stable IDs reserved for species-aware visuals/behaviour in the next release. */
+enum { SPECIES_CLASSIC, SPECIES_PLECO, SPECIES_ANGEL, SPECIES_CLOWN,
+       SPECIES_TIGER_BARB, SPECIES_SUNFISH, SPECIES_NEON, SPECIES_GUPPY, SPECIES_DANIO,
+       SPECIES_BLUE_TANG, SPECIES_YELLOW_TANG, SPECIES_GRAMMA, SPECIES_BANGGAI,
+       SPECIES_FIREFISH, SPECIES_CHROMIS, SPECIES_PAJAMA, SPECIES_GOBY, SPECIES_WRASSE, SPECIES_CORY, SPECIES_BRISTLE, SPECIES_COUNT };
+typedef struct { const char *name; bool marine; } species_info_t;
+static const species_info_t TANK_SPECIES[SPECIES_COUNT] = {
+    {"CLASSIC",false},{"PLECO",false},{"ANGELFISH",false},
+    {"CLOWNFISH",true},{"TIGER BARB",false},{"SUNFISH",false},
+    {"NEON TETRA",false},{"GUPPY",false},{"ZEBRA DANIO",false},
+    {"BLUE TANG",true},{"YELLOW TANG",true},{"ROYAL GRAMMA",true},{"BANGGAI",true},
+    {"FIREFISH",true},{"GREEN CHROMIS",true},{"PAJAMA CARDINAL",true},{"NEON GOBY",true},{"SIXLINE WRASSE",true},{"CORYDORAS",false},{"BRISTLENOSE",false}
+};
+enum { HABITAT_CLASSIC, HABITAT_FRESH, HABITAT_REEF, HABITAT_COUNT };
+static const char *const HABITAT_NAMES[HABITAT_COUNT] = {"STANDARD", "FRESHWATER", "SALTWATER"};
+static inline bool tank_species_allowed(int habitat, int species) {
+    if(species<0 || species>=SPECIES_COUNT) return false;
+    return habitat==HABITAT_CLASSIC || (species!=SPECIES_CLASSIC &&
+           (habitat==HABITAT_REEF ? TANK_SPECIES[species].marine : !TANK_SPECIES[species].marine));
+}
 #define N_FISH_MAX 6            /* array bound; the live count is tank_t.n_fish */
 #define N_FISH_START 2          /* a new tank: two contrasting adults */
 #define N_TRAINED_NAMES 4       /* name tokens the v2 model was trained on */
@@ -80,7 +108,8 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
                                                 * just under the surface (render.c
                                                 * VEG_SEG_DY 3.2 px pitch from y=352) */
 #define ALGAE_CELL 16                          /* px per glass-film grid cell */
-#define ALGAE_COLS (TANK_W / ALGAE_CELL)       /* 28 */
+#define ALGAE_COLS (TANK_UI_W / ALGAE_CELL)    /* 28: frozen save layout */
+#define ALGAE_CELL_X (TANK_W / ALGAE_COLS) /* wider sampling cells, not larger drawn blobs */
 #define ALGAE_ROWS (TANK_H / ALGAE_CELL)       /* 23 */
 #define ALGAE_CELLS (ALGAE_COLS * ALGAE_ROWS)
 #define ALGAE_DIRTY 0.15f                      /* film on more of the glass than this =
@@ -143,6 +172,9 @@ typedef struct {
                                      * keeper renames it (setup.c); saved per fish */
     const char *model_name; /* one of TRAINED_NAMES: the token the v2 model sees */
     int    preset;          /* roster index (colors, base size, temperament) */
+    uint8_t species; /* runtime mirror of the saved per-slot species ID */
+    bool glass_attached;
+    float glass_graze;
     float x, y;
     float heading;          /* radians */
     float yaw;              /* which way it faces, -1 (left) .. +1 (right), seen
@@ -374,6 +406,10 @@ typedef struct tank {
     float    shrimp_tap_t;         /* seconds since the last one */
     shrimp_t shrimp[SHRIMP_MAX];
     float    shrimp_tx, shrimp_ty, shrimp_tt;
+    float extra_decor_x[EXTRA_DECOR_COUNT];
+    uint8_t extra_decor_z[EXTRA_DECOR_COUNT];
+    uint8_t fish_species[N_FISH_MAX];
+    uint8_t habitat; /* Appearance and species catalog; existing fish always retained. */
     /* keeper habits the tank remembers (persisted by progression.c) */
     float    feed_spot_x;          /* where the keeper usually feeds (EMA); <0 = unknown */
     int      player_feedings;      /* MEALS: feedings the fish ate from (2026-09-14, Strato: a tap
@@ -441,6 +477,16 @@ typedef struct tank {
  * happened (starving with food in view). When false it's
  * a poll: an async advisor returns a completed decision the moment it's
  * ready; otherwise return the fish's current goal unchanged. */
+static inline const char *tank_species_role(int species) {
+    if(species==SPECIES_PLECO||species==SPECIES_BRISTLE)return "ALGAE GRAZER";
+    if(species==SPECIES_CORY)return "FALLEN FOOD";
+    if(species==SPECIES_GOBY)return "FISH CLEANER";
+    return "SWIMMER";
+}
+bool tank_item_allowed(int habitat,int item);
+void tank_habitat_defaults(tank_t *t,int habitat);
+bool tank_set_species(tank_t *t, int fish, int species);
+
 typedef goal_t (*advisor_fn)(const tank_t *t, int fish_idx, bool request);
 
 #define ADVISOR_MIN_INTERVAL 2.0f   /* s between asks for one fish (signature changed) */
@@ -491,7 +537,7 @@ void  tank_tick_sleep(tank_t *t, float seconds);
  * tank_toggle_light / tank_light_auto are the director's and the sim's
  * manual override (b-roll, tests); never saved. */
 /* Settings' LIGHTS OUT = MANUAL (light_auto) turns the idle rule
- * off and gives the keeper the old double-tap instead: two quick taps on the
+ * off. Wide V1 uses a short BOOT press; other platforms use two quick taps on the
  * glass, then a pause, flip light_manual_off. AUTO clears it. */
 #define LIGHT_IDLE_S     15        /* the default, seconds (tank_t.light_idle_s) */
 #define LIGHT_IDLE_MIN_S 5
@@ -507,7 +553,7 @@ void  tank_light_auto(tank_t *t);
  *    strongly hungry fish keep to their own business.
  *  tank_touch_tap:  call once per tap. A tap on the water surface (y below
  *    FEED_ZONE_Y) is a FEED gesture: pellets drop there, nothing else happens.
- *    Elsewhere: 2 quick taps then a pause flip the light - only with settings'
+ *    Elsewhere on platforms other than wide V1: 2 quick taps then a pause flip the light - only with settings'
  *    LIGHTS OUT on MANUAL (light_auto); 3+ quick taps =
  *    aggressive -> nearby fish flee the spot and stay spooked while taps
  *    continue (cooldown resets on each tap); after the cooldown, single taps
@@ -530,6 +576,7 @@ void  tank_touch_tap(tank_t *t, float x, float y);
  * of its spine (2026-09-14). Deliberately more travel than a tap, so aiming
  * at a fish can never shear the garden. */
 void  tank_touch_drag(tank_t *t, float x, float y);
+bool tank_take_feed_full(void);
 void  tank_feed(tank_t *t, float x, int n);
 
 /* Diagnostic: episodes where a starving fish ignored available food >4s.
@@ -590,7 +637,13 @@ void  tank_set_bubble_x(tank_t *t, float x);
  * The items are bits in tank_t.sd_unlocks; progression.c sells them
  * (progression_buy) and tank.c gives them their place. A bought thing is in
  * the tank for good. */
-enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2, SD_ITEM_CORAL = 1u << 3, SD_ITEM_CLUSTER = 1u << 4, SD_ITEM_SHRIMP = 1u << 5, SD_ITEM_COUNT = 6 };
+enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2, SD_ITEM_CORAL = 1u << 3, SD_ITEM_CLUSTER = 1u << 4, SD_ITEM_SHRIMP = 1u << 5, SD_ITEM_DIVER = 1u << 6, SD_ITEM_SKULL = 1u << 7,
+       SD_ITEM_CHEST = 1u << 8, SD_ITEM_RIBBON = 1u << 9,
+       SD_ITEM_HAIRGRASS = 1u << 10,
+       SD_ITEM_FERN=1u<<11, SD_ITEM_ANUBIAS=1u<<12, SD_ITEM_MOSS=1u<<13,
+       SD_ITEM_WOOD=1u<<14, SD_ITEM_STONES=1u<<15, SD_ITEM_CAVE=1u<<16, SD_ITEM_LOTUS=1u<<17,
+       SD_ITEM_LIVEROCK=1u<<18, SD_ITEM_SEAFAN=1u<<19, SD_ITEM_PLATE=1u<<20,
+       SD_ITEM_ANEMONE=1u<<21, SD_ITEM_SHELLS=1u<<22, SD_ITEM_COUNT = 23 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */

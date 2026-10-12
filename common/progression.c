@@ -117,6 +117,11 @@ typedef struct {
     /* the release that wrote it (2026-09-29, version.h PT_RELEASE_NUM:
      * 0x000200 = 0.2.0); 0 = a build from before release numbers */
     uint32_t saved_release;
+    uint32_t legacy_tail_padding; /* preserve the complete existing 1672-byte prefix */
+    float extra_decor_x[LEGACY_EXTRA_DECOR_COUNT];
+    uint8_t extra_decor_z1[LEGACY_EXTRA_DECOR_COUNT];
+    uint8_t fish_species[N_FISH_MAX];
+    uint8_t habitat; /* Previously reserved zero byte: old saves remain Classic. */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -203,6 +208,11 @@ _Static_assert(sizeof(save_t) >= 1672, "SAVE LAYOUT LOCK: save_t only ever grows
  * saves can start failing for space, and any nvs_flash_init error makes
  * main.c ERASE the partition. 1672 B today (the release stamp, 2026-09-29; ~54
  * entries a copy): 2328 B of headroom. */
+SAVE_AT(extra_decor_x, 1672);
+SAVE_AT(extra_decor_z1, 1692);
+SAVE_AT(fish_species, 1697);
+SAVE_AT(habitat, 1703);
+_Static_assert(sizeof(save_t)==1704, "expansion tail layout");
 #define SAVE_NVS_BUDGET 4000
 _Static_assert(sizeof(save_t) <= SAVE_NVS_BUDGET, "the save outgrew its NVS budget - see the math above");
 
@@ -216,6 +226,8 @@ static bool  s_ravenous;             /* begging/frenzy active until everyone's f
 static float s_ravenous_t;           /* seconds spent begging (dash time excluded) */
 static int   s_rav_feedings0;        /* player_feedings when the episode began (tank.ravenous_fed) */
 static bool  s_arrival_pending;
+static float s_breed_ready,s_breed_cool;
+static int32_t s_prev_trims,s_prev_cleaned;
 static float s_spawn_in = -1;        /* seconds until the spawning starts (-1 = not counting) */
 static bool  s_prev_night;
 static bool  s_booted;
@@ -244,6 +256,23 @@ const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
     { SD_ITEM_CORAL,  "CORAL",      "A BRANCHING REEF CORAL,",   "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
     { SD_ITEM_CLUSTER, "REEF CLUSTER", "A MATURE REEF ON A ROCK,", "FILLS OUT, THEN IT BLOOMS",  SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
     { SD_ITEM_SHRIMP,  "SHRIMP",    "A SCHOOL OF CHERRY SHRIMP", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
+    {SD_ITEM_DIVER,"SCUBA DIVER","A LITTLE UNDERWATER EXPLORER","WITH A MASK AND AIR TANK",90},
+    {SD_ITEM_SKULL,"SKULL","A WEATHERED SKULL ORNAMENT","A HIDEAWAY ON THE SAND",70},
+    {SD_ITEM_CHEST,"BUBBLER CHEST","OPENS AND RELEASES BUBBLES","A LITTLE SUNKEN TREASURE",140},
+    {SD_ITEM_RIBBON,"RIBBON GRASS","TALL WAVING RIBBON LEAVES","AN ORNAMENTAL GRASS PATCH",45},
+    {SD_ITEM_HAIRGRASS,"HAIRGRASS","A SOFT TUFT OF FINE BLADES","AN ORNAMENTAL GRASS PATCH",35},
+    {SD_ITEM_FERN,"JAVA FERN","LONG WAVING LANCE LEAVES","ROOTED ON A SMALL STONE",55},
+    {SD_ITEM_ANUBIAS,"ANUBIAS","BROAD DARK GREEN LEAVES","A LOW RHIZOME ON WOOD",50},
+    {SD_ITEM_MOSS,"MOSS MOUND","A CUSHION OF FINE GREEN","FRONDS OVER ROUNDED STONE",40},
+    {SD_ITEM_WOOD,"DRIFTWOOD","A BRANCHED WEATHERED ROOT","NATURAL RIVER HARDSCAPE",65},
+    {SD_ITEM_STONES,"RIVER STONES","SMOOTH ROUNDED PEBBLES","A LOW NATURAL STONE PILE",35},
+    {SD_ITEM_CAVE,"SLATE CAVE","STACKED FLAT STONE SLABS","AN OPEN SHELTER BELOW",70},
+    {SD_ITEM_LOTUS,"TIGER LOTUS","RED SPECKLED ROUND LEAVES","A TALL FRESHWATER ACCENT",75},
+    {SD_ITEM_LIVEROCK,"REEF ARCH","POROUS CORALLINE ROCK","AN OPEN REEF SWIM THROUGH",85},
+    {SD_ITEM_SEAFAN,"SEA FAN","A DELICATE BRANCHING FAN","PURPLE REEF SILHOUETTE",90},
+    {SD_ITEM_PLATE,"PLATE CORAL","LAYERED SCALLOPED PLATES","A LOW REEF TERRACE",95},
+    {SD_ITEM_ANEMONE,"ANEMONE","SWAYING TENTACLES","A COLORFUL REEF RESIDENT",100},
+    {SD_ITEM_SHELLS,"SHELL BED","RIDGED FAN SHAPED SHELLS","A PALE MARINE SAND ACCENT",40},
 };
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
@@ -289,10 +318,11 @@ bool progression_sell(tank_t *t, int item) {
     return true;
 }
 bool progression_buy(tank_t *t, int item) {
-    if (item < 0 || item >= SD_ITEM_COUNT) return false;
+    if (item < 0 || item >= SD_ITEM_COUNT || !tank_item_allowed(t->habitat,item)) return false;
     const sd_item_t *it = &SD_ITEMS[item];
     if ((t->sd_unlocks & it->bit) || t->sd_balance < it->price) return false;
     t->sd_balance -= it->price; t->sd_unlocks |= it->bit;
+    if (item >= EXTRA_DECOR_FIRST) tank_decor_reset(t,item);
     if (it->bit == SD_ITEM_PLANT) tank_plant_place(t);
     if (it->bit == SD_ITEM_SNAIL) tank_snail_place(t);
     if (it->bit == SD_ITEM_CASTLE) tank_castle_place(t);
@@ -342,7 +372,23 @@ static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_
  * in, so there is always a pair to court (2026-09-24: the spawning needs
  * two fish in the grass; tank_add_fish already fell back to fish 0 and 1) */
 static float parent_rank(const fish_t *f) { return (f->stage >= STAGE_ADULT ? 100.0f : 0.0f) + f->trust; }
+bool progression_breed_pair(const tank_t *t,int *a,int *b){
+    *a=*b=-1;
+    if(t->n_fish>=POP_CAP||t->n_fish>=N_FISH_MAX)return false;
+    for(int i=0;i<t->n_fish;i++)for(int j=i+1;j<t->n_fish;j++){
+        const fish_t *x=&t->fish[i],*y=&t->fish[j];
+        if(x->stage<STAGE_ADULT||y->stage<STAGE_ADULT||x->species!=y->species)continue;
+        if(x->hunger>4||y->hunger>4||x->stress>3||y->stress>3||x->energy<4||y->energy<4)continue;
+        if(!tank_species_allowed(t->habitat,x->species))continue;
+        *a=i;*b=j;return true;
+    }
+    return false;
+}
 static void pick_parents(const tank_t *t, int *pa, int *pb) {
+#ifdef POCKET_TANK_WIDE_V1
+    progression_breed_pair(t,pa,pb);return;
+#endif
+
     int a = -1, b = -1;
     for (int i = 0; i < t->n_fish; i++) {
         float r = parent_rank(&t->fish[i]);
@@ -357,10 +403,14 @@ static void pick_parents(const tank_t *t, int *pa, int *pb) {
 static void do_arrival(tank_t *t) {
     int a, b;
     pick_parents(t, &a, &b);
+#ifdef POCKET_TANK_WIDE_V1
+    if(a<0||b<0||s_breed_cool>0)return;
+#endif
     int slot = tank_add_fish(t, a, b);
     s_arrival_pending = false;
     s_spawn_in = -1; t->spawning = false; t->spawn_danced = 0;
     if (slot < 0) return;
+    s_breed_ready=0;s_breed_cool=BREED_COOLDOWN_S;
     int nb = tank_nursery_bed(t);            /* born in the grass it was courted in */
     if (nb >= 0) {
         float x0, x1; tank_veg_bed(t, nb, &x0, &x1, NULL, NULL);
@@ -472,6 +522,21 @@ static const char *const STAGE_WORDS[4] = { "A FRY", "A JUVENILE", "AN ADULT", "
 int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *staged) {
     if (staged) *staged = s_arrival_pending;
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 2) return 0;
+#ifdef POCKET_TANK_WIDE_V1
+    int a,b;bool pair=progression_breed_pair(t,&a,&b);
+    memset(out,0,sizeof(*out)*3);
+    const char *titles[]={"PAIR","NURSERY","REST"};
+    const char *words[]={"SAME SPECIES ADULT PAIR","KEEP SOME PLANT COVER","SIX HOURS BETWEEN FRY"};
+    const char *words2[]={"WELL FED, CALM, RESTED","15 MINUTES OF GOOD CARE","ONLY ACTIVE TIME COUNTS"};
+    for(int i=0;i<3;i++){snprintf(out[i].title,sizeof out[i].title,"%s",titles[i]);snprintf(out[i].words,sizeof out[i].words,"%s",words[i]);snprintf(out[i].words2,sizeof out[i].words2,"%s",words2[i]);}
+    out[0].met=pair;out[0].frac=pair?1:0;out[0].kind=FRY_REQ_GROW;
+    out[1].met=s_breed_ready>=BREED_READY_S;out[1].frac=s_breed_ready/BREED_READY_S;out[1].kind=FRY_REQ_GRASS;
+    out[2].met=s_breed_cool<=0;out[2].frac=1-s_breed_cool/BREED_COOLDOWN_S;out[2].kind=FRY_REQ_FEED;
+    snprintf(out[0].progress,sizeof out[0].progress,"%s",pair?"PAIR READY":"PAIR NOT READY");
+    snprintf(out[1].progress,sizeof out[1].progress,"%d / 15 MIN",(int)s_breed_ready/60);
+    snprintf(out[2].progress,sizeof out[2].progress,"%d MIN REMAIN",(int)(s_breed_cool+59)/60);
+    return 3;
+#endif
     gate_t g[CARE_GATES_MAX];
     int n = care_gates(t, g);
     for (int i = 0; i < n; i++) {
@@ -544,6 +609,9 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
 }
 
 static bool arrival_earned(const tank_t *t) {
+#ifdef POCKET_TANK_WIDE_V1
+    int a,b;return s_breed_cool<=0&&s_breed_ready>=BREED_READY_S&&progression_breed_pair(t,&a,&b)&&tank_nursery_bed(t)>=0;
+#endif
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX) return false;
     if (tank_nursery_bed(t) < 0) return false;   /* no grass to be born in */
     int met, total;
@@ -552,10 +620,17 @@ static bool arrival_earned(const tank_t *t) {
 }
 
 void progression_force_arrival(tank_t *t) { s_arrival_pending = true; do_arrival(t); }
-void progression_woke(tank_t *t) { if (s_arrival_pending) do_arrival(t); }
+void progression_woke(tank_t *t) {
+#ifdef POCKET_TANK_WIDE_V1
+    (void)t; /* Offline catchup never delivers a birth or advances its timers. */
+#else
+    if(s_arrival_pending)do_arrival(t);
+#endif
+}
 void progression_stage_arrival(tank_t *t) { (void)t; if (!s_arrival_pending) { s_arrival_pending = true; mark_dirty(); } }
 
 void progression_fresh(tank_t *t) {
+    s_breed_ready=s_breed_cool=0;s_prev_trims=s_prev_cleaned=0;
     tank_new_population(t);          /* a new tank: two FRY, contrasting -
                                       * the keeper watches them grow up */
     for (int i = 0; i < N_FISH_MAX; i++) s_age[i] = 0;
@@ -640,6 +715,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     tank_veg_sync(t);
     memcpy(t->algae, sv.algae, ALGAE_CELLS);
     t->trims = sv.trims; t->cells_cleaned = sv.cells_cleaned;
+    t->habitat=sv.habitat<HABITAT_COUNT?sv.habitat:HABITAT_CLASSIC;
     /* the sand dollar tail (zeros for an older save: the ledger back-pays) */
     t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned; t->sd_unlocks = sv.sd_unlocks & ((1u << SD_ITEM_COUNT) - 1);
     for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = i < t->n_fish ? sv.sd_paid_fish[i] : 0;
@@ -658,6 +734,14 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     if (sv.coral_rgb) tank_coral_set_rgb(t, sv.coral_rgb);
     t->coral_growth = sv.coral_growth > 0 ? sv.coral_growth : 0;   /* 0 = full (tank_coral_growth) */
     if (sv.cluster_x > 0) tank_decor_set(t, 4, sv.cluster_x, sv.cluster_z1 ? sv.cluster_z1 - 1 : DECOR_Z_FRONT);
+    for(int i=0;i<LEGACY_EXTRA_DECOR_COUNT;i++) {
+        if (isfinite(sv.extra_decor_x[i]) && sv.extra_decor_x[i]>0)
+            tank_decor_set(t,i+EXTRA_DECOR_FIRST,sv.extra_decor_x[i],sv.extra_decor_z1[i]==3?DECOR_Z_FRONT:DECOR_Z_BACK);
+    }
+    for(int i=0;i<N_FISH_MAX;i++) {
+        t->fish_species[i]=sv.fish_species[i]<SPECIES_COUNT?sv.fish_species[i]:SPECIES_CLASSIC;
+        t->fish[i].species=t->fish_species[i];
+    }
     tank_cluster_set_scheme(t, sv.cluster_scheme);
     t->cluster_growth = sv.cluster_growth > 0 ? sv.cluster_growth : 0;
     if (t->sd_unlocks & SD_ITEM_SHRIMP) {             /* the school back in the grass, its count and its progress */
@@ -749,7 +833,7 @@ void progression_tick(tank_t *t, float dt) {
     if (changed_someone) set_tms(t, TMS_CHANGED_SOMEONE);
     if (t->player_feedings > 0) set_tms(t, TMS_FIRST_FEEDING);
     /* upkeep milestones + event saves (a chore done deserves to stick) */
-    static int32_t s_prev_trims, s_prev_cleaned;
+
     if (t->trims > 0) set_tms(t, TMS_FIRST_TRIM);
     if (t->cells_cleaned >= 30) set_tms(t, TMS_FIRST_CLEANING);
     if (t->trims != s_prev_trims || t->cells_cleaned != s_prev_cleaned) {
@@ -784,6 +868,15 @@ void progression_tick(tank_t *t, float dt) {
     t->ravenous = s_ravenous;
     t->ravenous_fed = s_ravenous && t->player_feedings != s_rav_feedings0;
 
+#ifdef POCKET_TANK_WIDE_V1
+    if(dt>0&&dt<=1){
+        s_breed_cool=fmaxf(0,s_breed_cool-dt);
+        int a,b;
+        if(s_breed_cool<=0&&progression_breed_pair(t,&a,&b)&&tank_nursery_bed(t)>=0)
+            s_breed_ready=fminf(BREED_READY_S,s_breed_ready+dt);
+        else {s_breed_ready=0;s_arrival_pending=false;}
+    }
+#endif
     /* the courtship tell: one condition shy of an arrival (or one staged),
      * the parents-to-be pair up - tank.c stages the episodes. The pair is
      * the one do_arrival will name (pick_parents). */
@@ -793,7 +886,13 @@ void progression_tick(tank_t *t, float dt) {
          * every bed and the courting stops until one regrows. */
         int met, total;
         arrival_conditions(t, &met, &total);
-        if (s_arrival_pending || met >= total - 1) {
+        if (
+#ifdef POCKET_TANK_WIDE_V1
+            s_arrival_pending && s_breed_cool<=0
+#else
+            s_arrival_pending || met >= total - 1
+#endif
+        ) {
             int a, b;
             pick_parents(t, &a, &b);
             if (a >= 0 && b >= 0) { t->courting = true; t->court_a = (int8_t)a; t->court_b = (int8_t)b; }
@@ -858,6 +957,11 @@ bool progression_save(tank_t *t) {
     sv.coral_growth = t->coral_growth;
     sv.cluster_x = t->cluster_x > 0 ? t->cluster_x : 0; sv.cluster_z1 = (uint8_t)(t->cluster_z + 1); sv.cluster_scheme = t->cluster_scheme;
     sv.cluster_growth = t->cluster_growth;
+    for(int i=0;i<LEGACY_EXTRA_DECOR_COUNT;i++) {
+        sv.extra_decor_x[i]=t->extra_decor_x[i]; sv.extra_decor_z1[i]=t->extra_decor_z[i]+1;
+    }
+    memcpy(sv.fish_species,t->fish_species,sizeof sv.fish_species);
+    sv.habitat=t->habitat<HABITAT_COUNT?t->habitat:HABITAT_CLASSIC;
     sv.shrimp_n = (t->sd_unlocks & SD_ITEM_SHRIMP) ? t->shrimp_n : 0; sv.shrimp_food = t->shrimp_food;
     sv.shrimp_cool = t->shrimp_cool > 0 ? t->shrimp_cool : 0; sv.shrimp_eaten = t->shrimp_eaten;
     sv.setup_pending = s_setup_pending;
@@ -892,4 +996,50 @@ void progression_ack_milestones(tank_t *t) {
         if (t->fish[i].ms_seen != t->fish[i].ms_bits) { t->fish[i].ms_seen = t->fish[i].ms_bits; changed = true; }
     if (t->tank_ms_seen != t->tank_ms_bits) { t->tank_ms_seen = t->tank_ms_bits; changed = true; }
     if (changed) mark_dirty();
+}
+
+void progression_context_capture(progression_context_t *out) {
+    memset(out,0,sizeof *out);
+    memcpy(&out->s_breed_ready,&s_breed_ready,sizeof s_breed_ready);
+    memcpy(&out->s_breed_cool,&s_breed_cool,sizeof s_breed_cool);
+    memcpy(&out->s_prev_trims,&s_prev_trims,sizeof s_prev_trims);
+    memcpy(&out->s_prev_cleaned,&s_prev_cleaned,sizeof s_prev_cleaned);
+    memcpy(&out->s_age,&s_age,sizeof s_age);
+    memcpy(&out->s_loaded_release,&s_loaded_release,sizeof s_loaded_release);
+    memcpy(&out->s_since_save,&s_since_save,sizeof s_since_save);
+    memcpy(&out->s_dirty_since,&s_dirty_since,sizeof s_dirty_since);
+    memcpy(&out->s_dirty,&s_dirty,sizeof s_dirty);
+    memcpy(&out->s_ravenous,&s_ravenous,sizeof s_ravenous);
+    memcpy(&out->s_ravenous_t,&s_ravenous_t,sizeof s_ravenous_t);
+    memcpy(&out->s_rav_feedings0,&s_rav_feedings0,sizeof s_rav_feedings0);
+    memcpy(&out->s_arrival_pending,&s_arrival_pending,sizeof s_arrival_pending);
+    memcpy(&out->s_spawn_in,&s_spawn_in,sizeof s_spawn_in);
+    memcpy(&out->s_prev_night,&s_prev_night,sizeof s_prev_night);
+    memcpy(&out->s_booted,&s_booted,sizeof s_booted);
+    memcpy(&out->s_setup_pending,&s_setup_pending,sizeof s_setup_pending);
+    memcpy(&out->s_newborn,&s_newborn,sizeof s_newborn);
+    memcpy(&out->s_sd_pending,&s_sd_pending,sizeof s_sd_pending);
+    memcpy(&out->s_sd_prev_feedings,&s_sd_prev_feedings,sizeof s_sd_prev_feedings);
+}
+void progression_context_restore(const progression_context_t *in) {
+    memcpy(&s_breed_ready,&in->s_breed_ready,sizeof s_breed_ready);
+    memcpy(&s_breed_cool,&in->s_breed_cool,sizeof s_breed_cool);
+    memcpy(&s_prev_trims,&in->s_prev_trims,sizeof s_prev_trims);
+    memcpy(&s_prev_cleaned,&in->s_prev_cleaned,sizeof s_prev_cleaned);
+    memcpy(&s_age,&in->s_age,sizeof s_age);
+    memcpy(&s_loaded_release,&in->s_loaded_release,sizeof s_loaded_release);
+    memcpy(&s_since_save,&in->s_since_save,sizeof s_since_save);
+    memcpy(&s_dirty_since,&in->s_dirty_since,sizeof s_dirty_since);
+    memcpy(&s_dirty,&in->s_dirty,sizeof s_dirty);
+    memcpy(&s_ravenous,&in->s_ravenous,sizeof s_ravenous);
+    memcpy(&s_ravenous_t,&in->s_ravenous_t,sizeof s_ravenous_t);
+    memcpy(&s_rav_feedings0,&in->s_rav_feedings0,sizeof s_rav_feedings0);
+    memcpy(&s_arrival_pending,&in->s_arrival_pending,sizeof s_arrival_pending);
+    memcpy(&s_spawn_in,&in->s_spawn_in,sizeof s_spawn_in);
+    memcpy(&s_prev_night,&in->s_prev_night,sizeof s_prev_night);
+    memcpy(&s_booted,&in->s_booted,sizeof s_booted);
+    memcpy(&s_setup_pending,&in->s_setup_pending,sizeof s_setup_pending);
+    memcpy(&s_newborn,&in->s_newborn,sizeof s_newborn);
+    memcpy(&s_sd_pending,&in->s_sd_pending,sizeof s_sd_pending);
+    memcpy(&s_sd_prev_feedings,&in->s_sd_prev_feedings,sizeof s_sd_prev_feedings);
 }
