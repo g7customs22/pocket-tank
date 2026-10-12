@@ -44,7 +44,8 @@ interactive hardware session or an assessment of real capacitive-touch sensitivi
 
 Physical BOOT/GPIO0 was the existing light key. PWR remains sleep/power.
 A short release now hides/restores controls and page/card including modal and
-scroll. Only 30ms switch debounce applies; no double gesture or detection delay.
+scroll after a 350ms double-press window. Double press switches White/UV style.
+Release debounce is 30ms and minimum press is 50ms; style can change while off.
 Long at 700ms toggles light once. Clean view starts unobstructed and maps every
 pixel of the full 640x172 panel into the aquarium, without hidden control hitboxes.
 Fish taps and decoration holds stay in the aquarium while clean view is active. Chord/reset and

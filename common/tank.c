@@ -1005,6 +1005,7 @@ int   tank_decor_z_at(int item, int i) {
 }
 int   tank_decor_z_index(int item, int z) { return item != 0 ? (z == DECOR_Z_BACK ? 0 : 1) : z; }
 float tank_decor_x(const tank_t *t, int item) {
+    if(item>=UV_DECOR_FIRST&&item<SD_ITEM_COUNT){float x=t->uv.x[item-UV_DECOR_FIRST];return x>0?x:TANK_W*(item==23?.38f:.68f);}
     if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) {
         float x=t->extra_decor_x[item-EXTRA_DECOR_FIRST];
         return x>0 ? x : TANK_W*(0.15f+0.14f*((item-EXTRA_DECOR_FIRST)%6));
@@ -1015,7 +1016,7 @@ float tank_decor_x(const tank_t *t, int item) {
     if (item != 0) return 0;
     return t->plant_x > 0 ? t->plant_x : PLANT_X_DEFAULT;
 }
-int tank_decor_z(const tank_t *t, int item) { if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) return t->extra_decor_z[item-EXTRA_DECOR_FIRST]; return item == 0 ? t->plant_z : item == 2 ? t->castle_z : item == 3 ? t->coral_z : item == 4 ? t->cluster_z : DECOR_Z_MIDDLE; }
+int tank_decor_z(const tank_t *t, int item) { if(item>=UV_DECOR_FIRST&&item<SD_ITEM_COUNT)return t->uv.z[item-UV_DECOR_FIRST]; if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) return t->extra_decor_z[item-EXTRA_DECOR_FIRST]; return item == 0 ? t->plant_z : item == 2 ? t->castle_z : item == 3 ? t->coral_z : item == 4 ? t->cluster_z : DECOR_Z_MIDDLE; }
 static float decor_top(const tank_t *t, int item) {         /* the piece's highest pixel */
     if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) return TANK_H-110;
     if (item == 0) { float top; tank_veg_bed(t, 3, NULL, NULL, &top, NULL); return top; }
@@ -1034,6 +1035,7 @@ int tank_decor_hit(const tank_t *t, float x, float y) {
     return -1;
 }
 void tank_decor_reset(tank_t *t, int item) {
+    if(item>=UV_DECOR_FIRST&&item<SD_ITEM_COUNT){t->uv.x[item-UV_DECOR_FIRST]=0;t->uv.z[item-UV_DECOR_FIRST]=DECOR_Z_BACK;return;}
     if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) {
         t->extra_decor_x[item-EXTRA_DECOR_FIRST]=0;
         t->extra_decor_z[item-EXTRA_DECOR_FIRST]=DECOR_Z_BACK;
@@ -1051,6 +1053,7 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (z < 0) z = 0;
     if (z >= DECOR_Z_N) z = DECOR_Z_N - 1;
     uint8_t z2 = (uint8_t)(z == DECOR_Z_BACK ? DECOR_Z_BACK : DECOR_Z_FRONT);   /* no AMONG for these */
+    if(item>=UV_DECOR_FIRST&&item<SD_ITEM_COUNT){t->uv.x[item-UV_DECOR_FIRST]=x;t->uv.z[item-UV_DECOR_FIRST]=z2;return;}
     if (item >= EXTRA_DECOR_FIRST && item < SD_ITEM_COUNT) {
         t->extra_decor_x[item-EXTRA_DECOR_FIRST]=x;
         t->extra_decor_z[item-EXTRA_DECOR_FIRST]=z2; return;
@@ -2011,7 +2014,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
 /* Append-only catalog IDs. Standard retains the original mixed aquarium. */
 bool tank_item_allowed(int habitat,int item) {
     if(item<0||item>=SD_ITEM_COUNT)return false;
-    if(habitat==HABITAT_CLASSIC)return true;
+    if(habitat==HABITAT_CLASSIC||item>=UV_DECOR_FIRST)return true;
     bool marine=item==3||item==4||item>=18;
     bool shared=item==2||item==5||(item>=6&&item<=8);
     return shared || (habitat==HABITAT_REEF?marine:!marine);

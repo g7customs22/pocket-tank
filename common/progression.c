@@ -122,6 +122,7 @@ typedef struct {
     uint8_t extra_decor_z1[LEGACY_EXTRA_DECOR_COUNT];
     uint8_t fish_species[N_FISH_MAX];
     uint8_t habitat; /* Previously reserved zero byte: old saves remain Classic. */
+    tank_uv_t uv; /* optional v5 cosmetic tail; absent in old NVS saves */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -212,7 +213,7 @@ SAVE_AT(extra_decor_x, 1672);
 SAVE_AT(extra_decor_z1, 1692);
 SAVE_AT(fish_species, 1697);
 SAVE_AT(habitat, 1703);
-_Static_assert(sizeof(save_t)==1704, "expansion tail layout");
+_Static_assert(offsetof(save_t,uv)==1704 && sizeof(save_t)==1720, "UV append-only tail layout");
 #define SAVE_NVS_BUDGET 4000
 _Static_assert(sizeof(save_t) <= SAVE_NVS_BUDGET, "the save outgrew its NVS budget - see the math above");
 
@@ -289,6 +290,8 @@ const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
     {SD_ITEM_PLATE,"PLATE CORAL","LAYERED SCALLOPED PLATES","A LOW REEF TERRACE",95},
     {SD_ITEM_ANEMONE,"ANEMONE","SWAYING TENTACLES","A COLORFUL REEF RESIDENT",100},
     {SD_ITEM_SHELLS,"SHELL BED","RIDGED FAN SHAPED SHELLS","A PALE MARINE SAND ACCENT",40},
+    {SD_ITEM_NEON_FERN,"NEON FERN","FLUORESCENT ORNAMENTAL FERN","WHITE AND UV LOOKS INCLUDED",55},
+    {SD_ITEM_NEON_GRASS,"NEON GRASS","FLUORESCENT ORNAMENTAL GRASS","WHITE AND UV LOOKS INCLUDED",45},
 };
 /* Only gameplay earnings use the multiplier. Grants and sale refunds stay 1x. */
 static void sd_credit(tank_t *t, int64_t n, bool earned) {
@@ -853,6 +856,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     tank_veg_sync(t);
     memcpy(t->algae, sv.algae, ALGAE_CELLS);
     t->trims = sv.trims; t->cells_cleaned = sv.cells_cleaned;
+    t->uv=sv.uv;t->uv.style=t->uv.style==1;
     t->habitat=sv.habitat<HABITAT_COUNT?sv.habitat:HABITAT_CLASSIC;
     /* the sand dollar tail (zeros for an older save: the ledger back-pays) */
     t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned; t->sd_unlocks = sv.sd_unlocks & ((1u << SD_ITEM_COUNT) - 1);
@@ -1097,6 +1101,7 @@ bool progression_save(tank_t *t) {
     }
     memcpy(sv.fish_species,t->fish_species,sizeof sv.fish_species);
     sv.habitat=t->habitat<HABITAT_COUNT?t->habitat:HABITAT_CLASSIC;
+    sv.uv=t->uv;
     sv.shrimp_n = (t->sd_unlocks & SD_ITEM_SHRIMP) ? t->shrimp_n : 0; sv.shrimp_food = t->shrimp_food;
     sv.shrimp_cool = t->shrimp_cool > 0 ? t->shrimp_cool : 0; sv.shrimp_eaten = t->shrimp_eaten;
     sv.setup_pending = s_setup_pending;

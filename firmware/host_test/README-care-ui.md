@@ -48,7 +48,8 @@ progress; birth resets progress and starts the existing 21600-second cooldown.
 Other slots/offline do not advance these clocks. Existing 88-byte progression
 contexts have zeroed padding; six padding bytes store binding and centisecond
 grace state (at most 0.005 second quantization on capture). All preexisting offsets,
-tank size, journal schema and legacy save size are unchanged. No migration.
+offsets remain unchanged for the care-only checkpoint. The subsequent UV feature
+appends a tail and migrates the save schema; see README-uv.md for exact compatibility.
 
 Future gameplay rewards are doubled: meals 4; stages 10/20/50; birth 40; trust 30;
 algae/trim chores 50. Prices, sale refunds, direct grants and stored balances are
@@ -67,7 +68,8 @@ state. From plain aquarium with no remembered page it opens MENU. A captured tou
 setup or reset confirmation prevents toggling. New navigation/dismissal discards
 remembered page state; tank switching cannot restore a previous tank's card.
 Long hold at 700ms toggles aquarium lighting once. Short release acts after only
-30ms switch debounce. There is no double gesture or detection delay. Clean view
+30ms switch debounce and a 350ms double-press window. Double press changes
+White/UV style, including while off; long hold retains that style. Clean view
 starts with all controls hidden; the entire 640x172 area shows aquarium pixels and
 routes touches to aquarium interactions, including areas formerly under buttons.
 Fish taps and decoration holds do not reopen panels in clean view. A short press

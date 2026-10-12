@@ -53,7 +53,24 @@ static inline void dirty_span(int x0, int x1, int y) {
     row[w1] |= 0xFFFFFFFFu >> (31 - (x1 & 31));
 }
 
+/* Cosmetic material palette only: converted once per shape, never a screen filter. */
+static bool g_uv_scene,g_uv_material;
+static int g_scene_uv=-1;
+static uint32_t uv_material_rgb(uint32_t rgb){
+    int r=(rgb>>16)&255,g=(rgb>>8)&255,b=rgb&255;
+    int lum=(3*r+6*g+b)/10;if(lum<30)return (uint32_t)((lum/2)<<16|(lum/3)<<8|lum);
+    int rr,gg,bb;
+    if(g>r&&g>b){rr=lum/4;gg=lum+65;bb=lum+105;}
+    else if(r>g*6/5){rr=lum+105;gg=lum/3;bb=lum+80;}
+    else if(b>g){rr=lum+45;gg=lum/3;bb=lum+125;}
+    else{rr=lum/2;gg=lum+30;bb=lum+95;}
+    if(rr>255)rr=255;
+    if(gg>255)gg=255;
+    if(bb>255)bb=255;
+    return (uint32_t)((rr<<16)|(gg<<8)|bb);
+}
 static uint16_t rgb565(uint32_t rgb, float dim) {
+    if(g_uv_material)rgb=uv_material_rgb(rgb);
     uint32_t r = (uint32_t)(((rgb >> 16) & 255) * dim);
     uint32_t g = (uint32_t)(((rgb >> 8) & 255) * dim);
     uint32_t b = (uint32_t)((rgb & 255) * dim);
@@ -84,6 +101,7 @@ static void px(ctx_t *c, int x, int y, uint16_t col) {
  * cost (vegetation, algae film, light shafts, the stats card backdrop). */
 typedef struct { int r, g, b; uint16_t v; } src_t;
 static inline src_t src_color(uint32_t rgb, float dim) {
+    if(g_uv_material)rgb=uv_material_rgb(rgb);
     src_t s;
     s.r = (int)(((rgb >> 16) & 255) * dim);
     s.g = (int)(((rgb >> 8) & 255) * dim);
@@ -519,6 +537,7 @@ static inline void span_final(ctx_t *c, int x0, int x1, int y, const src_t *s, i
  * pre-tint below) */
 static inline uint32_t water_rgb(int y) {
     float p = (float)y / TANK_H;
+    if(g_uv_scene)return mix(0x160e35,0x050919,p);
     if(g_habitat==HABITAT_FRESH) return mix(0x235950,0x0b2119,p);
     if(g_habitat==HABITAT_REEF) return mix(0x146c91,0x082744,p);
     return p < 0.45f ? mix(0x0a3c46, 0x08272f, p / 0.45f)
@@ -579,8 +598,11 @@ static inline void veg_span(ctx_t *c, int x0, int x1, int y, const src_t *s, boo
     else       span(c, x0, x1, y, s, 255);
 }
 /* layer: 0 = the even fronds, 1 = the odd ones, -1 = every frond */
-static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool final) {
+static void draw_veg_impl(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool final) {
     veg_tint_fill(c->dim);
+    bool material=g_uv_material;g_uv_material=false;
+    src_t vein=src_color(0xbaff62,c->dim),edge=src_color(0x57eaff,c->dim);
+    g_uv_material=material;
     int n; tank_veg_bed(t, b, NULL, NULL, NULL, &n);
     /* the sword plant (bed 3, the shop): broad lanceolate leaves - a narrow
        stem, 7 px half-width at 40% of the way up, a point at the tip - a
@@ -623,9 +645,15 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
             float cx = xs[k] + (xs[k + 1] - xs[k]) * fr;
             src_t s; s.v = pal[y];                              /* opaque: only .v is read */
             veg_span(c, (int)(cx - half), (int)(cx + half), y, &s, final);
+            if(g_uv_scene){
+                veg_span(c,(int)cx,(int)cx,y,&vein,final);
+                if(sword&&half>3&&y%7<2)veg_span(c,(int)(cx-half),(int)(cx+half),y,&edge,final);
+            }
         }
     }
 }
+static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool final){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;draw_veg_impl(c,t,b,seed,layer,final);g_uv_material=prior;}
+
 
 
 /* ---- the castle (2026-09-16, from Strato's castle-v2 mockup) ----
@@ -667,6 +695,14 @@ static void castle_tint_fill(float dim) {
         int y = CASTLE_FY - CASTLE_ROWS + r;
         uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
         for (int k = 0; k < CT_N; k++) {
+            if(g_uv_scene){
+                static const uint32_t uv[CT_N]={0x42618e,0x253052,0x1b2442,0x151b32,0x42d5ce,0xa4ff52,0x4ba852,
+                    0xff9ae7,0xd849bc,0x702966,0xe3bcff,0x7d54b5,0x382454,0x061019};
+                bool m=g_uv_material;g_uv_material=false;
+                g_castle_row[0][k][r]=rgb565(mix(w,uv[k],.8f),dim);
+                g_castle_row[1][k][r]=rgb565(mix(w,uv[k],.94f),dim);
+                g_uv_material=m;continue;
+            }
             g_castle_row[0][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : 0.70f), dim);
             g_castle_row[1][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : 0.82f), dim);
         }
@@ -858,7 +894,7 @@ static void castle_front_row(const cst_t *k) {
 }
 /* the whole castle (front = 0: the keep, then the front row over it - the
  * scene bake), or the front row alone (front = 1: over the fish) */
-static void draw_castle(ctx_t *c, int cx, int front, bool final) {
+static void draw_castle_impl(ctx_t *c, int cx, int front, bool final) {
     castle_tint_fill(c->dim);
     cst_t k = { c, cx, 1, final };
     if (front) { castle_front_row(&k); return; }
@@ -881,6 +917,8 @@ static void draw_castle(ctx_t *c, int cx, int front, bool final) {
     k.layer = 1;
     castle_front_row(&k);
 }
+static void draw_castle(ctx_t *c, int cx, int front, bool final){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;draw_castle_impl(c,cx,front,final);g_uv_material=prior;}
+
 /* the front row over a rect of the frame (a fish's box): only what the rect
  * covers is recomputed */
 static void draw_castle_front_rect(ctx_t *c, int cx, int x0, int y0, int x1, int y1) {
@@ -1042,11 +1080,14 @@ static void coral_tint_fill(uint32_t rgb, float dim) {
     tone[CO_SHADE] = mix(rgb, 0x000000, 0.24f);
     tone[CO_LIT]   = mix(rgb, 0xfff0b0, 0.36f);
     tone[CO_TIP]   = mix(rgb, 0xffe8a0, 0.58f);
+    bool material=g_uv_material;
+    if(g_uv_scene){tone[CO_RIM]=0x2edec8;tone[CO_BODY]=0xc33ca4;tone[CO_SHADE]=0x532b6c;tone[CO_LIT]=0xfa75da;tone[CO_TIP]=0xcaff63;g_uv_material=false;}
     for (int r = 0; r < CORAL_H; r++) {
         int y = CORAL_FY - CORAL_H + r;
         uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
         for (int k = 1; k < CO_N; k++) ds()->co_row[k][r] = rgb565(mix(w, tone[k], k == CO_TIP ? 0.94f : 0.90f), dim);   /* a light haze: the art's colour stays saturated */
     }
+    g_uv_material=material;
     g_coral_rgb = rgb; g_coral_dim = dim;
 }
 /* the crown (2026-09-23, Strato: "after it's fully grown it should sprout a
@@ -1089,7 +1130,7 @@ static void draw_crown(ctx_t *c, float ox, float oy, int n_t, float a0, float a1
     }
     if (*bx1 >= *bx0) { *bx0 -= 1; *by0 -= 1; *bx1 += 1; *by1 += 1; }
 }
-static void draw_coral_crown(ctx_t *c, int cx, uint32_t rgb, float growth, float clock,
+static void draw_coral_crown_impl(ctx_t *c, int cx, uint32_t rgb, float growth, float clock,
                              int *bx0, int *by0, int *bx1, int *by1) {
     float phase = (growth - 1.0f) / (CORAL_FULL - 1.0f);
     *bx0 = *by0 = 1 << 20; *bx1 = *by1 = -1;
@@ -1100,6 +1141,9 @@ static void draw_coral_crown(ctx_t *c, int cx, uint32_t rgb, float growth, float
     /* a fan from ~29 deg left of up to 29 deg right, past the horizontal */
     draw_crown(c, ox, oy, CORAL_TENT, -3.14159f * 0.16f, -3.14159f * 0.84f, len, mix(rgb, 0xffffff, 0.55f), 0, clock, bx0, by0, bx1, by1);
 }
+static void draw_coral_crown(ctx_t *c, int cx, uint32_t rgb, float growth, float clock,
+                             int *bx0, int *by0, int *bx1, int *by1){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;draw_coral_crown_impl(c,cx,rgb,growth,clock,bx0,by0,bx1,by1);g_uv_material=prior;}
+
 /* a low mound of floor stones round a piece's base (2026-09-24): the same
  * pebble tones and position hash as the floor, an ellipse half_w wide whose
  * crest sits 6 px above the base line and whose skirt runs 3 px below it,
@@ -1134,7 +1178,7 @@ static void draw_floor_mound(ctx_t *c, int cx, int half_w, int rise, bool final)
 /* the coral at centre x (its base on the floor), in the keeper's colour.
  * final: vignetted here and untagged (the scene-cache path); otherwise the
  * frame's own sweep does it */
-static void draw_coral(ctx_t *c, int cx, uint32_t rgb, float growth, bool final) {
+static void draw_coral_impl(ctx_t *c, int cx, uint32_t rgb, float growth, bool final) {
     if (growth > 1) growth = 1;
     int q = (int)(growth * (CORAL_Q - 0.01f));
     if (q != g_coral_q) { coral_build(growth); g_coral_q = q; }
@@ -1162,6 +1206,8 @@ static void draw_coral(ctx_t *c, int cx, uint32_t rgb, float growth, bool final)
         }
     draw_floor_mound(c, cx, CORAL_HALF_W - 4, 9, final);              /* anchored: the trunk grows out of a hump of stones */
 }
+static void draw_coral(ctx_t *c, int cx, uint32_t rgb, float growth, bool final){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;draw_coral_impl(c,cx,rgb,growth,final);g_uv_material=prior;}
+
 
 /* ---- the snail, procedural (2026-09-16; Strato: "explore doing the same
  * for the snail so the aesthetic matches") ----
@@ -1491,7 +1537,7 @@ static void cl_tint_fill(int scheme, float dim) {
     }
     g_cl_scheme = scheme; g_cl_dim = dim;
 }
-static void draw_cluster(ctx_t *c, int cx, int scheme, float growth, bool final) {
+static void draw_cluster_impl(ctx_t *c, int cx, int scheme, float growth, bool final) {
     if (growth > 1) growth = 1;
     int q = (int)(growth * (CL_Q - 0.01f));
     if (q != g_cl_q) { cl_build(growth); g_cl_q = q; }
@@ -1519,13 +1565,15 @@ static void draw_cluster(ctx_t *c, int cx, int scheme, float growth, bool final)
         }
     draw_floor_mound(c, cx, CLUSTER_HALF_W - 2, 6, final);            /* anchored: the rock sits in a low hump of the floor's stones */
 }
+static void draw_cluster(ctx_t *c, int cx, int scheme, float growth, bool final){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;draw_cluster_impl(c,cx,scheme,growth,final);g_uv_material=prior;}
+
 /* the bloom (growth 1 -> CLUSTER_FULL): more and more tentacles, dealt one
  * at a time round the hosts - the four tube mouths, the coral's seven tips,
  * the brain's top - up to CL_TENT_MAX, each host's fan widening as it fills.
  * Per frame, swaying (draw_crown); the bounding box for the caller's rect. */
 #define CL_TENT_MAX 48
 #define CL_HOSTS    12
-static void draw_cluster_crown(ctx_t *c, int cx, int scheme, float growth, float clock, int *bx0, int *by0, int *bx1, int *by1) {
+static void draw_cluster_crown_impl(ctx_t *c, int cx, int scheme, float growth, float clock, int *bx0, int *by0, int *bx1, int *by1) {
     *bx0 = *by0 = 1 << 20; *bx1 = *by1 = -1;
     float phase = (growth - 1.0f) / (CLUSTER_FULL - 1.0f);
     if (phase <= 0) return;
@@ -1553,6 +1601,8 @@ static void draw_cluster_crown(ctx_t *c, int cx, int scheme, float growth, float
         if (qx1 >= qx0) { if (qx0 < *bx0) *bx0 = qx0; if (qy0 < *by0) *by0 = qy0; if (qx1 > *bx1) *bx1 = qx1; if (qy1 > *by1) *by1 = qy1; }
     }
 }
+static void draw_cluster_crown(ctx_t *c, int cx, int scheme, float growth, float clock, int *bx0, int *by0, int *bx1, int *by1){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;draw_cluster_crown_impl(c,cx,scheme,growth,clock,bx0,by0,bx1,by1);g_uv_material=prior;}
+
 
 static bool cluster_state(const tank_t *t, int *cx, int *z, bool *placing) {
     if (!(t->sd_unlocks & SD_ITEM_CLUSTER)) { *cx = -1; *z = DECOR_Z_MIDDLE; *placing = false; return false; }
@@ -1569,11 +1619,22 @@ static void extra_box(ctx_t *c,float x,float y,float scale,int dx,int dy,int w,i
     int iw=(int)(w*scale), ih=(int)(h*scale);
     rect_fill(c,(int)(x+dx*scale),(int)(y+dy*scale),iw>0?iw:1,ih>0?ih:1,rgb);
 }
-static void draw_extra(ctx_t *c,int item,float x,float y,float clock,float scale,bool bubbles) {
+static void draw_extra_impl(ctx_t *c,int item,float x,float y,float clock,float scale,bool bubbles) {
 #define EB(dx,dy,w,h,rgb) extra_box(c,x,y,scale,dx,dy,w,h,rgb)
 #define EE(dx,dy,rx,ry,rgb) fill_ellipse(c,x+(dx)*scale,y+(dy)*scale,(rx)*scale,(ry)*scale,rgb,255)
     EE(0,0,27,3,0x283e35);
-    if(item==6) { /* tank, suit, mask, hoses and flippers */
+    if(item==23||item==24){
+        int count=item==23?9:17;
+        for(int k=0;k<count;k++){
+            float dx=-29+k*58.f/(count-1),h=item==23?45+(k*17)%40:24+(k*13)%48;
+            for(int j=0;j<(int)h;j++){
+                float sway=sinf(clock*.8f+k+j*.03f)*j*.12f;
+                EB(dx+sway,-j,item==23?2:3,2,item==23?0x65ac8f:0xb56b95);
+                if(item==23&&j>12&&j%9==0){EE(dx+sway-4,-j,6,2.5f,0x7bc4a5);EE(dx+sway+4,-j-3,6,2.5f,0x91ceb0);}
+            }
+            EE(dx+sinf(clock*.8f+k+h*.03f)*h*.12f,-h,2.5f,3,item==23?0xc4dda4:0xe7adc7);
+        }
+    } else if(item==6) { /* tank, suit, mask, hoses and flippers */
         EB(7,-49,9,27,0x8c9d91); EB(9,-47,3,23,0xd3d8bd);
         EE(0,-34,10,17,0x263e46); EB(-7,-37,15,5,0xe7a84c);
         EE(-2,-59,11,11,0x263e46); EB(-11,-64,19,9,0xe8d68e);
@@ -1648,13 +1709,75 @@ static void draw_extra(ctx_t *c,int item,float x,float y,float clock,float scale
             }
         }
     }
+    /* UV-only pigments follow each ornament's own geometry. No flashing,
+     * halo buffer or screen-wide postprocess: bounded opaque detail strokes. */
+    if(g_uv_scene){
+        bool material=g_uv_material;g_uv_material=false;
+        if(item==6){EB(-9,-62,15,2,0x67ffde);EB(-8,-39,17,3,0xff72cb);EB(9,-45,3,19,0xc9ff63);}
+        else if(item==7){EE(-9,-29,3,4,0xb7ff58);EE(10,-28,3,4,0xb7ff58);EB(-4,-44,2,7,0xf686e2);}
+        else if(item==8){EB(-20,-26,3,23,0x69f9da);EB(17,-26,3,23,0x69f9da);EE(0,-20,3,3,0xffdc63);}
+        else if(item==11||item==12||item==17){
+            int count=item==12?5:7;
+            for(int k=0;k<count;k++){
+                float dx=-26+k*52.f/(count-1),h=item==11?50+(k*17)%38:item==12?22+(k*11)%20:48+(k*13)%40;
+                float sway=sinf(clock+k)*2;
+                EB(dx+sway,-h-(item==11?17:5),1,item==11?34:10,0xbfff64);
+                if(item!=11)for(int j=-1;j<=1;j++)EE(dx+sway+j*5,-h-2+j%2*3,1.5f,1.5f,item==17?0xffcc67:0x6bffe5);
+            }
+        }else if(item==13){for(int k=0;k<18;k++)EE(-25+(k*19)%50,-12-(k*13)%18,1.6f,2,k%2?0xcaff63:0x70fff0);}
+        else if(item==14){for(int k=0;k<3;k++)for(int h=4;h<42;h+=7)EB(-20+k*18+h*(k-1)*.25f,-12-h,4,2,0x73ffce);}
+        else if(item==15){for(int k=0;k<7;k++)for(int j=0;j<3;j++)EB(-31+(k*17)%50+j*4,-7-(k/3)*12-j,3,2,k%2?0xff84d7:0x65efff);}
+        else if(item==16){EB(-34,-36,68,2,0x69ffdc);for(int k=0;k<3;k++){EB(-31,-24+k*8,12,2,0xdd92ff);EB(18,-24+k*8,12,2,0xdd92ff);}}
+        else if(item==18){for(int k=0;k<9;k++){float a=k*3.14159f/8;EE(cosf(a)*28+3,-sinf(a)*49-11,3,2,k%2?0xff9cde:0xbaff66);}}
+        else if(item==19){for(int k=0;k<11;k++)for(int side=-1;side<=1;side+=2)EE(side*31,-34-k*5,2,2,k%2?0xa4ff71:0x7ef4ff);}
+        else if(item==20){for(int k=0;k<4;k++){float dx=k%2?7:-7;EB(dx-25+k*4,-12-k*13,50-k*8,2,k%2?0x8bffea:0xf8a8fa);}}
+        else if(item==21){for(int k=0;k<13;k++){float dx=(k-6)*3+sinf(clock*1.6f+k+33*.06f)*33*.15f;EE(dx,-43,2,2,k%2?0xcaff63:0xff8fdf);}}
+        else if(item==22){for(int k=0;k<3;k++)for(int j=-2;j<=2;j++)EB(-22+k*22+j*4,-15-k%2*10,1,9,k%2?0xff92d8:0x83ffdd);}
+        else if(item==23||item==24){
+            int count=item==23?9:17;
+            for(int k=0;k<count;k++){float dx=-29+k*58.f/(count-1),h=item==23?45+(k*17)%40:24+(k*13)%48;
+                for(int j=8;j<(int)h;j+=item==23?9:12){float sway=sinf(clock*.8f+k+j*.03f)*j*.12f;
+                    if(item==23){EB(dx+sway-8,-j,16,1,0xcfff65);EE(dx+sway+7,-j-3,2,2,0x7cffe8);}
+                    else EB(dx+sway,-j,3,3,0x88ffea);
+                }
+                EE(dx+sinf(clock*.8f+k+h*.03f)*h*.12f,-h,3,3,item==23?0xd4ff66:0xffa7ed);
+            }
+        }else if(item==9||item==10){int n=item==9?9:23;for(int k=0;k<n;k++){int h=item==9?48+(k*17)%35:18+(k*11)%23;float dx=-30+60.f*k/(n-1)+sinf(clock*.8f+k*.7f+(h-1)*.035f)*(h-1)*.15f;EE(dx,-h+1,1.3f,3,item==9?0xaaff62:0xffa3e2);}}
+        g_uv_material=material;
+    }
 #undef EE
 #undef EB
 }
+static void draw_extra(ctx_t *c,int item,float x,float y,float clock,float scale,bool bubbles){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;draw_extra_impl(c,item,x,y,clock,scale,bubbles);g_uv_material=prior;}
+
 void render_extra_preview(uint16_t *fb,int stride,int item,int x,int y,float clock) {
     ctx_t c=ctx_full(fb,stride,1.0f); draw_extra(&c,item,(float)x,(float)y,clock,.55f,false);
 }
-static void habitat_scenery(ctx_t *c, const tank_t *t) {
+
+static void blit_icon_scaled(ctx_t *,int,int,const icon_t *,int,bool);
+static uint16_t *g_material_preview;
+static void material_preview(uint16_t *fb,int stride,int item,int x,int y,float clock,bool uv){
+    enum { PW=192,PH=162 };
+    if(!g_material_preview)g_material_preview=calloc(PW*PH,sizeof(uint16_t));
+    if(!g_material_preview)return;
+    bool prior=g_uv_scene;g_uv_scene=uv;g_uv_material=false;
+    g_veg_row_dim=g_castle_dim=g_coral_dim=g_cl_dim=-1;
+    uint16_t bg=rgb565(uv?0x100b27:0x092028,1);
+    for(int i=0;i<PW*PH;i++)g_material_preview[i]=bg;
+    ctx_t c={g_material_preview,PW,1,0,TANK_H-176,PW,PH};
+    if(item>=EXTRA_DECOR_FIRST)draw_extra(&c,item,96,TANK_H-14,clock,1,false);
+    else if(item==2){draw_castle(&c,96,0,false);draw_castle(&c,96,1,false);}
+    else if(item==3)draw_coral(&c,96,0xdc9865,1,false);
+    else if(item==4)draw_cluster(&c,96,0,1,false);
+    else if(item==0){tank_t sample;memset(&sample,0,sizeof sample);sample.sd_unlocks=SD_ITEM_PLANT;sample.plant_x=96;sample.clock=clock;tank_veg_set(&sample,3,.35f);draw_veg(&c,&sample,3,13,-1,false);}
+    else { /* Resident icons retain their normal appearance; they are not ornaments. */
+        c.oy=0;blit_icon_scaled(&c,64,65,item==1?&icon_shop_snail:&icon_shop_shrimp,2,true);
+    }
+    g_uv_scene=prior;g_uv_material=false;g_veg_row_dim=g_castle_dim=g_coral_dim=g_cl_dim=-1;
+    ctx_t out=ctx_full(fb,stride,1);
+    for(int yy=0;yy<PH/3;yy++)for(int xx=0;xx<PW/3;xx++)px(&out,x+xx,y+yy,g_material_preview[(yy*3+1)*PW+xx*3+1]);
+}
+static void habitat_scenery_impl(ctx_t *c, const tank_t *t) {
     if(t->habitat==HABITAT_CLASSIC) return;
     for(int x=75;x<TANK_W;x+=265) {
         if(t->habitat==HABITAT_FRESH) {
@@ -1675,6 +1798,8 @@ static void habitat_scenery(ctx_t *c, const tank_t *t) {
         }
     }
 }
+static void habitat_scenery(ctx_t *c, const tank_t *t){bool prior=g_uv_material;g_uv_material=prior||g_uv_scene;habitat_scenery_impl(c,t);g_uv_material=prior;}
+
 static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
     ctx_t c = ctx_world(fb, stride, dim);
     /* water gradient #0a3c46 → #08272f → #031015 */
@@ -1768,16 +1893,18 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
 }
 
 void render_tank(const tank_t *t, uint16_t *fb, int stride) {
-    if(g_habitat!=t->habitat) {
+    bool uv=t->uv.style==1&&!t->night;
+    if(g_habitat!=t->habitat||g_uv_scene!=uv) {
         g_veg_row_dim=g_castle_dim=g_coral_dim=g_cl_dim=-1;
         g_habitat=t->habitat;
     }
+    g_uv_scene=uv;g_uv_material=false;
     float dim = t->night ? 0.45f : 1.0f;
     ctx_t c = ctx_world(fb, stride, dim);
     int64_t p0 = PROF_MARK();
     bool cached = g_scene && g_dirty && stride == TANK_W;
     if (cached) memset(g_dirty, 0, TANK_H * DIRTY_WORDS_PER_ROW * sizeof(uint32_t));
-    struct { short x0, y0, x1, y1; } rects[5 + EXTRA_DECOR_COUNT + MAX_FOOD + MAX_BUBBLE + N_FISH_MAX + VEG_BEDS_MAX + SHRIMP_MAX];
+    struct { short x0, y0, x1, y1; } rects[5 + EXTRA_DECOR_COUNT + UV_DECOR_COUNT + MAX_FOOD + MAX_BUBBLE + N_FISH_MAX + VEG_BEDS_MAX + SHRIMP_MAX];
     int nr = 0;
 #define DYN_RECT(cx0, cy0, cx1, cy1) do { if (cached && nr < (int)(sizeof rects / sizeof rects[0])) { \
         rects[nr].x0 = (short)(cx0); rects[nr].y0 = (short)(cy0); \
@@ -1796,7 +1923,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     int scene_lx = lplacing ? -1 : lx;
     g_veg_mask_cx = ccx >= 0 && cz == DECOR_Z_FRONT ? ccx : -1;
     if (cached) {
-        if (g_scene_habitat != t->habitat || g_scene_dim != dim || g_scene_ms != t->tank_ms_bits || g_scene_castle_x != scene_cx || g_scene_castle_z != cz
+        if (g_scene_uv != (int)uv || g_scene_habitat != t->habitat || g_scene_dim != dim || g_scene_ms != t->tank_ms_bits || g_scene_castle_x != scene_cx || g_scene_castle_z != cz
             || g_scene_coral_x != scene_kx || g_scene_coral_z != kz || g_scene_coral_rgb != krgb || g_scene_coral_q != kq
             || g_scene_cl_x != scene_lx || g_scene_cl_z != lz || g_scene_cl_q != lq || g_scene_cl_scheme != lscheme) {
             g_scene_castle_x = scene_cx; g_scene_castle_z = cz;
@@ -1808,8 +1935,11 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
                milestone - or a reset back to a bare pair - rebakes too
                (it used to wait for the next day/night change). */
             bake_scene(t, g_scene, dim);
+            /* Static cache writes are not dynamic foreground pixels. Otherwise
+             * the first frame after a style change darkens them a second time. */
+            memset(g_dirty,0,TANK_H*DIRTY_WORDS_PER_ROW*sizeof(uint32_t));
             if (g_vig) g_vig_filled = true;
-            g_scene_habitat=t->habitat; g_scene_dim = dim; g_scene_ms = t->tank_ms_bits; g_scene_epoch++;
+            g_scene_uv=(int)uv;g_scene_habitat=t->habitat; g_scene_dim = dim; g_scene_ms = t->tank_ms_bits; g_scene_epoch++;
         }
         if (!(g_primed_fb == fb && g_primed_epoch == g_scene_epoch))
             memcpy(fb, g_scene, TANK_W * TANK_H * sizeof(uint16_t));
@@ -3169,8 +3299,9 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price;
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    if(g_shp_modal>=EXTRA_DECOR_FIRST) draw_extra(&c,g_shp_modal,X+W/2,Y+78,t->clock,.7f,false);
-    else blit_icon_scaled(&c, X + (W - 64) / 2, Y + 14, shop_icon(g_shp_modal), 2, true);
+    material_preview(fb,stride,g_shp_modal,X+64,Y+10,t->clock,false);
+    material_preview(fb,stride,g_shp_modal,X+224,Y+10,t->clock,true);
+    draw_text(&c,X+68,Y+68,1,MSP_TEAL,"WHITE");draw_text(&c,X+238,Y+68,1,0xd2a6ff,"UV");
     draw_text(&c, X + (W - text_w(it->name, 3)) / 2, Y + 88, 3, 0xffffff, it->name);
     draw_text(&c, X + (W - text_w(it->words, 2)) / 2, Y + 118, 2, MSP_TEAL, it->words);
     draw_text(&c, X + (W - text_w(it->words2, 2)) / 2, Y + 138, 2, MSP_TEAL, it->words2);
@@ -3324,7 +3455,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
 #else
               MSP_DIM,
 #endif
-              "FISH ARE QUIET AT NIGHT");
+              t->uv.style ? (t->night?"BLACKLIGHT / OFF":"BLACKLIGHT / ON") : (t->night?"WHITE LIGHT / OFF":"WHITE LIGHT / ON"));
     set_row(&c, SET_ROW3_Y, "LIGHTS OUT", SET_LIGHT, 2, t->light_auto ? 1 : 0);
     if (t->light_auto) {
         /* AUTO: AFTER [ n ] SEC, the number with its chevrons */

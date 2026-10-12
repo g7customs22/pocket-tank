@@ -312,6 +312,7 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
                 if(dx||dy)text(native,8+dx,158+dy,1,0x061014,level);
             text(native,8,158,1,s->battery.low?0xffce73:0xf2ffff,level);
             if(s->battery.warning_s)text(native,55,158,1,0xffce73,"LOW BATTERY");
+            text(native,440,158,1,0xa9e2dd,t->uv.style?(t->night?"UV / OFF":"UV / ON"):(t->night?"WHITE / OFF":"WHITE / ON"));
             if(s->feed_notice_s)text(native,248,148,1,0xffce73,"FOOD LIMIT - WAIT FOR FISH");
             if(s->slot_error)text(native,152,16,1,0xffce73,"SAVE UNAVAILABLE");
         }

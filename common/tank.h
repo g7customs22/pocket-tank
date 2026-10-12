@@ -31,6 +31,9 @@
 #define EXTRA_DECOR_FIRST 6
 #define EXTRA_DECOR_COUNT 17
 #define LEGACY_EXTRA_DECOR_COUNT 5
+#define UV_DECOR_FIRST 23
+#define UV_DECOR_COUNT 2
+typedef struct { float x[UV_DECOR_COUNT]; uint8_t z[UV_DECOR_COUNT], style, reserved; } tank_uv_t;
 /* Stable IDs reserved for species-aware visuals/behaviour in the next release. */
 enum { SPECIES_CLASSIC, SPECIES_PLECO, SPECIES_ANGEL, SPECIES_CLOWN,
        SPECIES_TIGER_BARB, SPECIES_SUNFISH, SPECIES_NEON, SPECIES_GUPPY, SPECIES_DANIO,
@@ -468,6 +471,7 @@ typedef struct tank {
     int      ask_rr;               /* rotating start index for fairness */
     uint32_t advisor_asks;         /* diagnostic: requests issued */
     uint32_t rng;                  /* xorshift state, deterministic */
+    _Alignas(8) tank_uv_t uv; /* appended extension: keep the complete v4 tank prefix */
 } tank_t;
 
 /* Advisor interface (Track 1 model, rule stub, or firmware LLM core).
@@ -643,7 +647,7 @@ enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 
        SD_ITEM_FERN=1u<<11, SD_ITEM_ANUBIAS=1u<<12, SD_ITEM_MOSS=1u<<13,
        SD_ITEM_WOOD=1u<<14, SD_ITEM_STONES=1u<<15, SD_ITEM_CAVE=1u<<16, SD_ITEM_LOTUS=1u<<17,
        SD_ITEM_LIVEROCK=1u<<18, SD_ITEM_SEAFAN=1u<<19, SD_ITEM_PLATE=1u<<20,
-       SD_ITEM_ANEMONE=1u<<21, SD_ITEM_SHELLS=1u<<22, SD_ITEM_COUNT = 23 };
+       SD_ITEM_ANEMONE=1u<<21, SD_ITEM_SHELLS=1u<<22, SD_ITEM_NEON_FERN=1u<<23, SD_ITEM_NEON_GRASS=1u<<24, SD_ITEM_COUNT = 25 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
