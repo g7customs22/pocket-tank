@@ -47,7 +47,7 @@ static void care_and_modal(uint16_t *fb){
     t.fish[1].hunger=5.6f;t.fish[1].energy=.1f;
     assert(!progression_breed_pair(&t,&a,&b));
     assert(progression_next_fry(&t,r,&staged)==3);
-    assert(strstr(r[0].words,"willow: HUNGRY/TIRED"));assert(strstr(r[0].progress,"BLOCKED"));assert(r[1].met);
+    assert(strstr(r[0].words,"willow: HUNGRY/TIRED"));assert(strstr(r[0].progress,"PAUSED"));assert(r[1].met);
     ms_open(&t,t.n_fish,false,true,0,r,3,staged);
     render_milestones(&t,fb,TANK_W);
     FILE *image=fopen("care-blockers.ppm","wb");assert(image);fprintf(image,"P6\n%d %d\n255\n",TANK_UI_W,TANK_H);
@@ -62,7 +62,7 @@ static void care_and_modal(uint16_t *fb){
     progression_tick(&t,1);render_milestones(&t,fb,TANK_W);
     assert(!strcmp(g_ms_sub,"1 / 15 MIN")&&g_ms_tip&&g_ms_row==row&&g_ms_k==k);
     t.fish[1].stress=3.01f;progression_tick(&t,.1f);render_milestones(&t,fb,TANK_W);
-    assert(strstr(g_ms_caption,"STRESSED")&&strstr(g_ms_sub,"0 / 15 MIN - BLOCKED")&&g_ms_tip);
+    assert(strstr(g_ms_caption,"STRESSED")&&strstr(g_ms_sub,"1 / 15 MIN - PAUSED")&&g_ms_tip);
     t.fish[1].stress=0;t.fish[1].stage=STAGE_JUV;
     progression_next_fry(&t,r,&staged);assert(strstr(r[0].words,"NEEDS TO GROW"));
     t.fish[1].stage=STAGE_ELDER;tank_set_species(&t,1,SPECIES_GUPPY);
@@ -105,8 +105,65 @@ static void portraits(uint16_t *fb){
         assert(fb[y*TANK_W+x]==expected[y*TANK_W+x]);
     free(expected);puts("PASS 20 species x 4 stages match aquarium core, locked single-ink silhouettes, classic palette preview preserved");
 }
+
+static progression_context_t context(void){progression_context_t c;progression_context_capture(&c);return c;}
+static void seconds(tank_t *t,int n){while(n--)progression_tick(t,1);}
+static void accumulated_care(void){
+ tank_t t;ready(&t);seconds(&t,120);assert(context().s_breed_ready==120);
+ t.fish[1].hunger=5.6f;seconds(&t,600);assert(context().s_breed_ready==120);
+ t.fish[1].hunger=2;t.fish[1].energy=1;seconds(&t,60);assert(context().s_breed_ready==120);
+ t.fish[1].energy=8;seconds(&t,60);assert(context().s_breed_ready==180);
+ t.fish[1].hunger=9;seconds(&t,300);assert(context().s_breed_ready==180);
+ progression_context_t save=context();tank_t saved=t;
+ ready(&t);seconds(&t,20);assert(context().s_breed_ready==20);
+ t=saved;progression_context_restore(&save);seconds(&t,50);assert(fabsf(context().s_breed_ready-170)<.01f);
+ t.fish[1].hunger=2;seconds(&t,30);assert(fabsf(context().s_breed_ready-200)<.01f && context().s_breed_bad_cs==0);
+ for(int bed=0;bed<tank_veg_beds(&t);bed++)tank_veg_set(&t,bed,VEG_NUB);
+ seconds(&t,100);assert(fabsf(context().s_breed_ready-200)<.01f);
+ tank_set_species(&t,0,SPECIES_GUPPY);tank_set_species(&t,1,SPECIES_GUPPY);
+ seconds(&t,1);assert(context().s_breed_ready==0);
+ ready(&t);save=context();save.s_breed_ready=42;save.s_breed_state_version=0;save.s_breed_pair=0;
+ progression_context_restore(&save);seconds(&t,1);assert(context().s_breed_ready==43);
+ seconds(&t,1000);assert(context().s_breed_ready==900);
+ t.ui_cover=false;seconds(&t,1);t.spawning=true;t.spawn_danced=SPAWN_DANCE_S;
+ progression_sd_take_award();seconds(&t,1);assert(t.n_fish==3 && progression_sd_take_award()==40);
+ assert(context().s_breed_cool==BREED_COOLDOWN_S && context().s_breed_ready==0);
+ save=context();save.s_breed_cool=21600;progression_context_restore(&save);seconds(&t,60);
+ assert(context().s_breed_ready==0 && context().s_breed_cool==21540);
+ ready(&t);int interrupted=0;float peak=0;
+ for(int k=0;k<36000;k++) {tank_tick(&t,.1f,advisor_rules);progression_tick(&t,.1f);
+  float v=context().s_breed_ready;if(v>peak)peak=v;
+  int a,b;if(!progression_breed_pair(&t,&a,&b))interrupted++;
+ }
+ printf("Natural rules auto-care, 1 active hour: peak accumulated %.2fs, interrupted frames %d\n",peak,interrupted);
+ assert(peak>300 && interrupted>0);
+ puts("PASS accumulated care, hunger/energy/cover pause, severe grace/decay/recovery, context switching/reload, pair invalidation, old padding, cap/cooldown");
+}
+static void doubled_rewards(void){
+ tank_t t;ready(&t);seconds(&t,1);progression_sd_take_award();t.sd_balance=t.sd_earned=0;
+ t.player_feedings++;seconds(&t,1);assert(t.sd_balance==4 && progression_sd_take_award()==4);
+ seconds(&t,1);assert(t.sd_balance==4 && progression_sd_take_award()==0);
+ t.algae_colonies+=100;seconds(&t,1);assert(progression_sd_take_award()==50);
+ t.trim_px+=PX_PER_CM*250;seconds(&t,1);assert(progression_sd_take_award()==50);
+ t.fish[0].trust=10;seconds(&t,1);assert(progression_sd_take_award()==30);
+ t.sd_paid_fish[0]=0;seconds(&t,1);assert(progression_sd_take_award()==110); /* 10+20+50+30 */
+ progression_sd_grant(&t,7);assert(progression_sd_take_award()==7);
+ int before=t.sd_balance;t.sd_unlocks|=SD_ITEM_CASTLE;assert(progression_sell(&t,2));
+ assert(t.sd_balance-before==30 && progression_sd_take_award()==30);
+ t.sd_balance=INT32_MAX-2;t.sd_earned=INT32_MAX-1;t.player_feedings++;seconds(&t,1);
+ assert(t.sd_balance==INT32_MAX && t.sd_earned==INT32_MAX && progression_sd_take_award()==2);
+ t.player_feedings++;seconds(&t,1);assert(progression_sd_take_award()==0);
+ progression_sd_grant(&t,INT32_MIN);assert(t.sd_balance==0);
+ const char *const *lines=progression_sd_earn_lines();assert(strstr(lines[0],"+4 ")&&strstr(lines[1],"+10/20/50")&&strstr(lines[2],"+40 "));
+ progression_context_t c=context();int32_t bal=t.sd_balance,earned=t.sd_earned;progression_context_restore(&c);
+ assert(t.sd_balance==bal && t.sd_earned==earned);
+ uint16_t *fb=calloc(TANK_W*TANK_H,2);assert(fb);t.clock=10;t.sd_balance=0;
+ progression_sd_grant(&t,INT32_MAX);render_sd_toast(&t,fb,TANK_W);t.sd_balance=0;
+ progression_sd_grant(&t,100);render_sd_toast(&t,fb,TANK_W);assert(g_toast_n==INT32_MAX);free(fb);
+ puts("PASS 2x meal/stages/trust/chores, no duplicate award, unchanged grant/refund, cap/overflow, reward labels");
+}
 int main(void){
     setvbuf(stdout,NULL,_IONBF,0);
     uint16_t *fb=calloc((size_t)TANK_W*TANK_H,2);assert(fb);
-    recovery();care_and_modal(fb);portraits(fb);free(fb);return 0;
+    accumulated_care();doubled_rewards();recovery();care_and_modal(fb);portraits(fb);free(fb);return 0;
 }

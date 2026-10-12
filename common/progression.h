@@ -182,6 +182,7 @@ const char *const *progression_fry_tip(int kind);
  * in tank_t (sd_paid_fish, sd_colonies_paid, sd_inches_paid) keeps a save
  * from paying twice. A tank saved before the shop is paid what it already
  * earned on its first boot with it, once (Strato: "yes, pay it once"). */
+#define SD_REWARD_MULTIPLIER 2
 #define SD_MEAL        2
 #define SD_STAGE_JUV   5
 #define SD_STAGE_ADULT 10
@@ -260,13 +261,16 @@ typedef struct {
     float s_dirty_since;
     bool s_dirty;
     bool s_ravenous;
+    uint16_t s_breed_bad_cs; /* old zeroed padding at 38: severe-care seconds x100 */
     float s_ravenous_t;
     int s_rav_feedings0;
     bool s_arrival_pending;
+    uint8_t s_breed_pair, s_breed_species, s_breed_state_version; /* old padding 49..51 */
     float s_spawn_in;
     bool s_prev_night;
     bool s_booted;
     bool s_setup_pending;
+    uint8_t s_breed_habitat; /* old padding at 59 */
     int s_newborn;
     int s_sd_pending;
     int32_t s_sd_prev_feedings;
@@ -278,5 +282,9 @@ void progression_context_restore(const progression_context_t *in);
 
 #define BREED_READY_S 900.0f
 #define BREED_COOLDOWN_S 21600.0f
+#define BREED_NEGLECT_GRACE_S 300.0f
+#define BREED_NEGLECT_DECAY 0.2f /* one earned second lost per five neglected seconds */
+#define BREED_NEGLECT_HUNGER 8.5f
+#define BREED_NEGLECT_STRESS 7.5f
 bool progression_breed_pair(const tank_t *t,int *a,int *b);
 #endif

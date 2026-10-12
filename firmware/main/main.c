@@ -335,6 +335,8 @@ static void sleep_button_poll(int64_t now) {
     int action=boot349_poll(&s_boot349,now,down,fresh,touch_port_confirm_up(),setup_active());
     if(action==BOOT349_RESET){
         ESP_LOGI(TAG,"BOOT + tap: reset prompt");touch_port_confirm_open();
+    }else if(action==BOOT349_PAGES){
+        touch_port_toggle_pages();
     }else if(action==BOOT349_LIGHT){
         boot349_toggle_light(&tank);progression_settings_changed();
         ESP_LOGI(TAG,"BOOT: aquarium light %s (MANUAL)",tank.light_manual_off?"off":"on");

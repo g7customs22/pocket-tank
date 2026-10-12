@@ -58,6 +58,7 @@ static bool s_bat; static int64_t s_bat_us;       /* the battery page up, and si
 #define CONFIRM_TIMEOUT_US (20LL * 1000000)
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 static int s_slot_request=-1;
+static struct { bool valid,ms,set,shop,bat; int sel,scroll,species_page; bool species,slots,habitat; ui349_view_t view; } s_hidden;
 static bool s_press_world;
 static bool s_trimmed; /* Latch across simulation ticks until release. */
 #endif
@@ -327,7 +328,11 @@ released:
 int touch_port_selected(void) { return s_sel; }
 bool touch_port_milestones(void) { return s_ms; }
 void touch_port_show_milestones(bool on) { if (s_ms && !on) render_milestones_leave(); s_ms = on; }
-void touch_port_dismiss(void) { s_sel = -1; if (s_ms) render_milestones_leave(); if (s_shop) render_shop_leave(); s_ms = false; s_set = false; s_shop = false; s_bat = false; }
+void touch_port_dismiss(void) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    if(s_hidden.valid){if(s_hidden.ms)render_milestones_leave();if(s_hidden.shop)render_shop_leave();s_hidden.valid=false;}
+#endif
+ s_sel = -1; if (s_ms) render_milestones_leave(); if (s_shop) render_shop_leave(); s_ms = false; s_set = false; s_shop = false; s_bat = false; }
 
 /* ---- reset confirm prompt ---- */
 void touch_port_confirm_open(void) {
@@ -359,6 +364,22 @@ bool touch_port_battery(void) { return s_bat; }
 void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_timer_get_time(); s_sel = -1; } }
 
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+void touch_port_toggle_pages(void){
+    if(s_cf||setup_active()||s_down||g_ui349.owner)return; /* Never cut a captured touch/confirmation in half. */
+    if(s_ms||s_set||s_shop||s_bat||s_sel>=0||g_ui349.slots_picker){
+        s_hidden.valid=true;s_hidden.ms=s_ms;s_hidden.set=s_set;s_hidden.shop=s_shop;s_hidden.bat=s_bat;s_hidden.sel=s_sel;
+        s_hidden.scroll=g_ui349.scroll;s_hidden.view=g_ui349.view;s_hidden.species=g_ui349.species_picker;
+        s_hidden.slots=g_ui349.slots_picker;s_hidden.habitat=g_ui349.habitat_picker;s_hidden.species_page=g_ui349.species_page;
+        s_ms=s_set=s_shop=s_bat=false;s_sel=-1;
+        g_ui349.species_picker=g_ui349.slots_picker=g_ui349.habitat_picker=false;
+    }else if(s_hidden.valid){
+        s_ms=s_hidden.ms;s_set=s_hidden.set;s_shop=s_hidden.shop;s_bat=s_hidden.bat;s_sel=s_hidden.sel;
+        s_sel_us=s_bat_us=esp_timer_get_time();g_ui349.view=s_hidden.view;g_ui349.scroll=s_hidden.scroll;
+        g_ui349.species_picker=s_hidden.species;g_ui349.slots_picker=s_hidden.slots;
+        g_ui349.habitat_picker=s_hidden.habitat;g_ui349.species_page=s_hidden.species_page;s_hidden.valid=false;
+    }else s_ms=true;
+    g_ui349.owner=0;s_back=false;s_held_page=false;
+}
 int touch_port_take_slot(void){int s=s_slot_request;s_slot_request=-1;return s;}
 void touch_port_slot_changed(void){touch_port_dismiss();s_down=false;s_held_page=false;s_trimmed=false;s_cf=false;s_cf_ans=0;s_back=false;}
 #endif

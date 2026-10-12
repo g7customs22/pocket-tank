@@ -3240,7 +3240,7 @@ static float g_toast_until = -1;
 void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
     int n = progression_sd_take_award();
     if (n > 0) {
-        if (t->clock < g_toast_until) g_toast_n += n; else g_toast_n = n;
+        if (t->clock < g_toast_until) { int64_t sum=(int64_t)g_toast_n+n;g_toast_n=(int)(sum>INT32_MAX?INT32_MAX:sum); } else g_toast_n = n;
         g_toast_until = t->clock + TOAST_S;
     }
     if (t->clock >= g_toast_until || t->clock < g_toast_until - TOAST_S - 1) return;   /* (a reset sends the clock back) */

@@ -25,11 +25,11 @@ Coverage:
   interrupt REST below 6. Recovery releases at 6 without immediate oscillation.
 - Fish recover independently, including the second fish on a requesting frame;
   the advisor traversal origin is fixed while the next-frame index changes.
-- An existing REST goal restored with energy 3 continues recovery. No new fields
-  are added to fish, tank, progression or the slot-journal payload/schema.
+- An existing REST goal restored with energy 3 continues recovery. No fish/tank layout or journal schema changes. Care tracking uses formerly
+  zeroed progression-context padding with frozen-offset assertions.
 - Live-like Willow hunger/energy blockers; exact breeding thresholds; age,
   species, habitat, plant-cover and cooldown feedback.
-- Open-panel 59-to-60-second update and failure reset preserve HOW and navigation.
+- Open-panel 59-to-60-second update and care pause preserve HOW and navigation.
 - All 20 species and four stages match the aquarium core at the same portrait
   pose; locked portraits are a single ink; classic palette previews are preserved;
   the actual milestone row uses the species-aware portrait.
@@ -40,6 +40,35 @@ interrupted-write regression cases are also run against the candidate.
 
 Behavior tradeoff: REST owns the goal during exhaustion recovery, including
 overriding learned decisions and finishing naturally selected low-energy rest.
-This does not change the breeding rule: 15 continuous qualifying active minutes
-are still required, and hunger/energy/stress failures still reset that timer.
-Autonomous survival and recovery do not promise uninterrupted breeding care.
+The local gameplay addition accumulates 900 qualifying active seconds for a bound
+pair. Ordinary health/cover lapses pause; hunger >=8.5 or stress >=7.5 for 300
+continuous active seconds starts decay at 0.2 earned seconds per active second.
+Recovery clears the severe-care clock. Pair/species/habitat invalidation resets
+progress; birth resets progress and starts the existing 21600-second cooldown.
+Other slots/offline do not advance these clocks. Existing 88-byte progression
+contexts have zeroed padding; six padding bytes store binding and centisecond
+grace state (at most 0.005 second quantization on capture). All preexisting offsets,
+tank size, journal schema and legacy save size are unchanged. No migration.
+
+Future gameplay rewards are doubled: meals 4; stages 10/20/50; birth 40; trust 30;
+algae/trim chores 50. Prices, sale refunds, direct grants and stored balances are
+unchanged. Legacy initial ledger back-pay remains at base rates. Credits and toast
+aggregation saturate safely at INT32_MAX; capped awards show actual credited coins.
+
+Additional tests cover care accumulation/pause/decay/recovery, old padding, context
+switch/reload, pair changes, birth/cooldown, natural rules over one active hour,
+reward paths/labels/repeated ticks/overflow, and unchanged manual/refund credits.
+`usability_host.c` exercises the production native 640x172 compositor using isolated
+states, writes screenshots, and checks navigation and species/tank picker targets.
+
+Physical BOOT/GPIO0 light key (separate from the power key): short press hides or
+restores the current page/card, retaining renderer modal and native scroll/picker
+state. From plain aquarium with no remembered page it opens MENU. A captured touch,
+setup or reset confirmation prevents toggling. New navigation/dismissal discards
+remembered page state; tank switching cannot restore a previous tank's card.
+Long hold at 700ms toggles aquarium lighting once. Debounced short presses wait
+350ms after release to distinguish doubles; double is recognized and reserved,
+with no assigned action pending user choice. Existing BOOT-plus-touch reset prompt
+is preserved and consumes the gesture. Boot-held keys are ignored until released.
+`button_gestures_host.c` tests the production classifier. The workspace QA fixture
+extracts the production visibility function and verifies hide/restore/protection.

@@ -48,4 +48,5 @@ void touch_port_set_bias(int px);              /* finger-landing correction: rep
 int  touch_port_bias(void);
 int touch_port_take_slot(void);
 void touch_port_slot_changed(void);
+void touch_port_toggle_pages(void); /* V1 light-key single: hide/restore current page */
 #endif
