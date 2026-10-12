@@ -261,7 +261,8 @@ void touch_port_poll(tank_t *t) {
 #else
         if (now - s_press_us < 350000 && dx * dx + dy * dy < 24 * 24) {
 #endif
-            if(clean){tank_touch_tap(t,s_px,s_py);goto released;}
+            /* Hidden controls suppress overlays, not creature selection. */
+            if(clean) goto select_creature;
             if (notice_current()) { notice_dismiss(); ESP_LOGI(TAG, "tap closed the announcement"); goto released; }
             if (s_set || s_back) { s_back = false; goto released; }   /* the settings page had the glass (render_settings_touch above) */
             if (s_shop) {                                           /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
@@ -290,6 +291,7 @@ void touch_port_poll(tank_t *t) {
                 ESP_LOGI(TAG, "card tap at %.0f,%.0f -> milestones", s_px, s_py);         under its MORE button) = milestones page */
                 s_ms = true; goto released;
             }
+select_creature:;
             /* fish first; only an empty tap reaches the water. 38 px radius
                (a fingertip on this 322 ppi panel covers ~60 px) against BOTH
                the press-time snapshot and the current position - whichever is
