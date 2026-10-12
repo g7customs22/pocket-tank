@@ -1,4 +1,5 @@
 #include "progression.h"
+#include "clock_policy.h"
 #include "version.h"
 #include <stddef.h>
 #include <string.h>
@@ -934,9 +935,8 @@ float progression_wake(tank_t *t, int64_t now_unix) {
     s_booted = true;
     if (!load_save(t, &saved_unix)) { progression_fresh(t); return -1; }
     float slept = -1;
-    if (now_unix > 0 && saved_unix > 0 && now_unix > saved_unix) {
-        int64_t span = now_unix - saved_unix;
-        if (span > PROGRESSION_SLEEP_CAP_S) span = PROGRESSION_SLEEP_CAP_S;
+    int64_t span = clock_offline_seconds(now_unix, saved_unix, PROGRESSION_SLEEP_CAP_S);
+    if (span > 0) {
         progression_slept(t, (float)span);
         slept = span / 3600.0f;
     }

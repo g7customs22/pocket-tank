@@ -2,6 +2,7 @@
  * Wall clock: esp time (set from the PCF85063 RTC at boot in Track 4; until
  * then it is 0 on a cold boot, which simply disables the ravenous rule). */
 #include "progression.h"
+#include "rtc_port.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -119,5 +120,5 @@ bool persist_port_erase(void) {
     return e == ESP_OK;
 }
 int64_t clock_port_now_unix(void) {
-    time_t now = time(NULL); return now > 1700000000 ? (int64_t)now : 0;   /* 0 until the RTC sets it */
+    time_t now = time(NULL); return rtc_port_time_trusted() && now > 1700000000 ? (int64_t)now : 0;   /* 0 until the RTC sets it */
 }
