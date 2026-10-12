@@ -66,7 +66,7 @@ int main(void) {
     assert(ui349_tap(true,false,200000,40,20));
     assert(!ui349_tap(true,false,200000,60,0));
     assert(!ui349_tap(true,false,600000,0,0));
-    assert(tap(&s,40,60)==UI349_CONSUMED && s.scroll==176);
+    assert(tap(&s,40,60)==UI349_CONSUMED && s.scroll==UI349_SCROLL_MAX-UI349_SCROLL_STEP);
     ui349_configure(&s,(ui349_view_t){100,"SETUP",false,0});
     assert(s.scroll==0 && tap(&s,590,30)==UI349_CONSUMED);
     assert(tap(&s,590,80)==UI349_CONSUMED);

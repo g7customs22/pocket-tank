@@ -12,7 +12,10 @@ static int tap(ui349_state_t *u,int x,int y){bool down;int tx,ty;ui349_input(u,t
 int main(void){
  uint16_t *fb=calloc(TANK_W*TANK_H,2);tank_t t;ready(&t);ui349_state_t u={0};u.battery.mv=3900;u.battery.pct=60;
  render_milestones_leave();render_milestones(&t,fb,TANK_W);ui349_configure(&u,(ui349_view_t){400,"MENU",true,0});shot("menu-top",&u,&t,fb);
- int taps=0;while(u.scroll<UI349_SCROLL_MAX){tap(&u,40,135);taps++;}shot("menu-bottom",&u,&t,fb);printf("Menu top to bottom: %d DOWN taps, %d pixels\n",taps,u.scroll);
+ assert(tap(&u,40,64)==UI349_CONSUMED && u.scroll==0);
+ int taps=0;while(u.scroll<UI349_SCROLL_MAX){tap(&u,40,135);taps++;}assert(taps==5&&u.scroll==UI349_SCROLL_MAX);tap(&u,40,135);assert(u.scroll==UI349_SCROLL_MAX);shot("menu-bottom",&u,&t,fb);printf("Menu top to bottom: %d DOWN taps, %d pixels\n",taps,u.scroll);
+ u.scroll=1;tap(&u,40,64);assert(u.scroll==0);u.scroll=UI349_SCROLL_MAX-1;tap(&u,40,135);assert(u.scroll==UI349_SCROLL_MAX);
+ u.scroll=0;tap(&u,40,135);assert(u.scroll==40);tap(&u,40,64);assert(u.scroll==0);
  fry_req_t r[FRY_REQ_MAX];bool staged;progression_context_t c=context();c.s_breed_ready=390;progression_context_restore(&c);
  for(int scenario=0;scenario<4;scenario++){
  t.fish[1].hunger=scenario==1?5.6f:scenario==2?9:2;t.fish[1].energy=scenario==1?.1f:8;
@@ -32,5 +35,12 @@ int main(void){
  u.species_picker=true;u.habitat=HABITAT_FRESH;shot("species",&u,&t,fb);assert(tap(&u,150,30)>=UI349_SPECIES_PICK);
  u.species_picker=false;u.slots_picker=true;u.active_slot=1;u.slots_present=7;u.slot_fish[0]=u.slot_fish[1]=u.slot_fish[2]=2;shot("tank-switcher",&u,&t,fb);
  assert(tap(&u,200,82)==UI349_SLOT_PICK+1);assert(tap(&u,590,30)==UI349_TANKS_BACK);
+ u.slots_picker=false;ui349_configure(&u,(ui349_view_t){0,"TANK",true,0});u.controls_hidden=true;render_tank(&t,fb,TANK_W);shot("clean-aquarium",&u,&t,fb);
+ uint16_t *native=calloc(640*172,2);assert(native);ui349_render(&u,&t,fb,native);
+ for(int y=0;y<172;y++)for(int x=0;x<640;x++){int tx,ty;bool down;assert(ui349_map(&u,x,y,&tx,&ty));assert(native[y*640+x]==fb[ty*TANK_W+tx]);
+  assert(ui349_input(&u,true,x,y,&down,&tx,&ty)==UI349_PASS&&down);assert(ui349_input(&u,false,x,y,&down,&tx,&ty)==UI349_PASS&&!down);
+ }
+ free(native);u.controls_hidden=false;assert(tap(&u,590,24)==UI349_MENU);
+ puts("PASS every clean-view pixel/touch including former rail hitboxes; visible MENU tap is consumed; two-line scroll/end clamps");
  puts("PASS native 640x172 scenarios, scroll and picker touch actions");free(fb);return 0;
 }

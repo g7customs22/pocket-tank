@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 
-ui349_state_t g_ui349;
+ui349_state_t g_ui349 = {.controls_hidden=true};
 static const uint8_t FONT5X7[][7] = {
     { 0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11 }, /* A */
     { 0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e }, /* B */
@@ -98,6 +98,7 @@ void ui349_configure(ui349_state_t *s, ui349_view_t view) {
 bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
     if(s->species_picker || s->habitat_picker || s->slots_picker) return false;
     if (x < 0 || x >= UI349_W || y < 0 || y >= UI349_H) return false;
+    if(ui349_clean_view(s)){*tx=x*(TANK_W-1)/(UI349_W-1);*ty=y*(TANK_H-1)/(UI349_H-1);return true;}
     if (ui349_world_view(s)) return v1_map_landscape(x, y, false, tx, ty);
     if (fish_view(s) && x >= FISH_VIEW_X && x < FISH_VIEW_X+FISH_VIEW_W) {
         *tx=s->camera_x+x-FISH_VIEW_X; *ty=s->camera_y+y; return true;
@@ -108,6 +109,7 @@ bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
 }
 /* Hit targets match the rectangles drawn below; rails never feed tank gestures. */
 static int rail_hit(const ui349_state_t *s, int x, int y) {
+    if(ui349_clean_view(s))return UI349_CONSUMED;
     if(s->slots_picker) {
         if(s->can_undo&&x>=552&&x<632&&y>=66&&y<110)return UI349_UNDO;
         if(x>=552&&x<632&&y>=12&&y<60)return UI349_TANKS_BACK;
@@ -176,15 +178,15 @@ int ui349_input(ui349_state_t *s, bool down, int x, int y, bool *content_down, i
         int action = !s->rail_moved && s->press_key == s->view.key && s->pressed == rail_hit(s, s->last_x, s->last_y)
                      ? s->pressed : UI349_CONSUMED;
         s->owner = 0;
-        if (action == 10) { s->scroll = clamp(s->scroll - 20, 0, UI349_SCROLL_MAX); return UI349_CONSUMED; }
-        if (action == 11) { s->scroll = clamp(s->scroll + 20, 0, UI349_SCROLL_MAX); return UI349_CONSUMED; }
+        if (action == 10) { s->scroll = clamp(s->scroll - UI349_SCROLL_STEP, 0, UI349_SCROLL_MAX); return UI349_CONSUMED; }
+        if (action == 11) { s->scroll = clamp(s->scroll + UI349_SCROLL_STEP, 0, UI349_SCROLL_MAX); return UI349_CONSUMED; }
         if (action == 12) { s->positioning = !s->positioning; return UI349_CONSUMED; }
         return action;
     }
     if (down) {
         /* Keep a captured drag in the content; crossing a rail cannot tap it. */
-        int left = ui349_world_view(s) ? V1_VIEW_X : UI349_PAGE_X;
-        int width = ui349_world_view(s) ? V1_VIEW_W : TANK_UI_W;
+        int left = ui349_clean_view(s)?0:ui349_world_view(s) ? V1_VIEW_X : UI349_PAGE_X;
+        int width = ui349_clean_view(s)?UI349_W:ui349_world_view(s) ? V1_VIEW_W : TANK_UI_W;
         (void)ui349_map(s, clamp(x, left, left + width - 1), clamp(y, 0, UI349_H - 1), tx, ty);
         s->last_x = *tx; s->last_y = *ty; *content_down = true;
     } else { *tx = s->last_x; *ty = s->last_y; s->owner = 0; }
@@ -286,6 +288,11 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
             text(native,252,20,1,0xa9e2dd,tank_species_role(species));
         }
     } else {
+        if(ui349_clean_view(s)){
+            for(int y=0;y<UI349_H;y++)for(int x=0;x<UI349_W;x++)
+                native[y*UI349_W+x]=source[(y*(TANK_H-1)/(UI349_H-1))*TANK_W+x*(TANK_W-1)/(UI349_W-1)];
+            return;
+        }
         v1_compose_world(source,native);
 #ifdef POCKET_TANK_WIDE_V1
         (void)t;

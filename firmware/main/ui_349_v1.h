@@ -5,6 +5,7 @@
 #define UI349_W 640
 #define UI349_H 172
 #define UI349_PAGE_X 96
+#define UI349_SCROLL_STEP 40 /* two 20px text lines; selection navigation is unchanged */
 #define UI349_SCROLL_MAX (TANK_H - UI349_H)
 typedef struct {
     int key;                 /* zero = aquarium, nonzero = readable page */
@@ -43,6 +44,7 @@ typedef struct {
     int camera_x, camera_y;
     int scroll, owner, pressed, press_key, last_x, last_y, press_x, press_y;
     bool positioning, rail_moved, species_picker, habitat_picker;
+    bool controls_hidden; /* presentation only; clean aquarium has no control hitboxes */
     int habitat, species_page;
     bool slots_picker, slot_error, can_undo;
     unsigned feed_notice_s; int slot_fish[3];
@@ -77,6 +79,7 @@ static inline bool ui349_tap(bool world, bool modal, int64_t elapsed_us, float d
     if (world) { dx *= (float)(TANK_W * UI349_H / TANK_H - 1) / (TANK_W - 1); dy *= (float)(UI349_H - 1) / (TANK_H - 1); }
     return elapsed_us < (modal ? 800000 : 350000) && dx*dx + dy*dy < 24*24;
 }
+static inline bool ui349_clean_view(const ui349_state_t *s){return s->controls_hidden && s->view.key==0 && !s->positioning;}
 bool ui349_world_view(const ui349_state_t *s);
 void ui349_configure(ui349_state_t *s, ui349_view_t view);
 bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty);

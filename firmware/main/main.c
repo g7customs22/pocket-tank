@@ -589,6 +589,10 @@ static void tank_task(void *arg) {
                                                 driven: extra samples inside the frame
                                                 keep quick finger taps from slipping
                                                 between 40 ms frame boundaries */
+            bool controls_visible=true;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+            controls_visible=!g_ui349.controls_hidden;
+#endif
             int sel = touch_port_selected();
             int64_t tc = esp_timer_get_time();
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
@@ -598,7 +602,7 @@ static void tank_task(void *arg) {
             else if (touch_port_settings()) view = (ui349_view_t){200, "OPTIONS", true, 0};
             else if (touch_port_shop()) view = (ui349_view_t){300, "SHOP", true, 0};
             else if (touch_port_milestones()) view = (ui349_view_t){400, "MENU", true, 0};
-            else if (notice_current()) view = (ui349_view_t){500, "NEWS", true, 76};
+            else if (controls_visible && notice_current()) view = (ui349_view_t){500, "NEWS", true, 76};
             else if (touch_port_battery()) view = (ui349_view_t){600, "BATTERY", true, 0};
             else if (sel >= 0) view = (ui349_view_t){700 + sel, "FISH", true, 0};
             /* Opening a description is a view change even within the same menu.
@@ -620,13 +624,13 @@ static void tank_task(void *arg) {
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
                 render_shop(&tank, fb[cur], TANK_W);
                 sel = -1;
-            } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
+            } else if(controls_visible) render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
             if (sel >= 0) render_stats_card(&tank, sel, fb[cur], TANK_W);   /* tapped fish: stats card (+ the pill) */
             {   /* the battery pill: with a card, while low, and a few seconds after the cable goes in;
                    the battery page (a tap on the pill) over the live tank in its place */
                 bool pages = touch_port_milestones() || touch_port_settings() || touch_port_shop() || setup_active() || touch_port_confirm_up();
                 bool bpage = touch_port_battery() && s_bat_ok && !pages;
-                bool pill = s_bat_ok && !pages && !bpage && (sel >= 0 || s_bat_low || now < s_bat_popup_us);
+                bool pill = controls_visible && s_bat_ok && !pages && !bpage && (sel >= 0 || s_bat_low || now < s_bat_popup_us);
                 if (bpage) {
                     bat_info_t bi;
                     battery_info(&s_bh, clock_port_now_unix(), (int)(s_bat_frac * 100 + 0.5f), s_bat_mv, s_bat_state, &bi);
@@ -636,7 +640,7 @@ static void tank_task(void *arg) {
             }
             if (!touch_port_milestones() && !touch_port_settings() && !touch_port_shop()) {   /* an announcement over the live tank */
                 const notice_t *nt = notice_current();
-                if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
+                if (controls_visible && nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
             if (setup_active()
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1

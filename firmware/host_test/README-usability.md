@@ -5,7 +5,7 @@ state was changed. `usability_host.c` generates PPM screenshots in outputs/ui-re
 convert with ImageMagick. This is a deterministic input/render harness, not an
 interactive hardware session or an assessment of real capacitive-touch sensitivity.
 
-## Recommendations for review (not implemented)
+## Findings and review status
 
 1. **Show care as minutes:seconds.** Confirmed renderer floors to whole minutes.
    Healthy, paused and decay screens are legible and name the blocked fish, but
@@ -15,10 +15,10 @@ interactive hardware session or an assessment of real capacitive-touch sensitivi
    150; with balance 4 the amount and YOU HAVE 4 are very dim. Input test confirms
    touching disabled UNLOCK dismisses the modal. Smallest change: keep it open,
    show NEED 146 MORE in readable ink. Buying at exactly 150 is visibly enabled.
-3. **Reduce scrolling effort.** Production UP/DOWN move 20 pixels per tap; all
-   196 pixels require ten taps. The help page and earnings list span multiple
-   views, and fish-card details continue below the initial view. Smallest change:
-   larger steps or held-button repeat, tested to leave overlap/context. The rails
+3. **Two-line scrolling: subsequently approved and implemented.** UP/DOWN now
+   move 40 pixels per tap; all 196 pixels require five taps (previously ten). The help page and earnings list span multiple
+   views, and fish-card details continue below the initial view. The last step clamps to the bottom, retaining odd final lines. Selection
+   arrows are unchanged; only viewport scroll uses the larger step. The rails
    are generous 76x48 / 80x44 targets. Compact content buttons are generally 32px
    high with hit slop; actual finger comfort still requires device evaluation.
 4. **Label fish care meters numerically.** Fish detail uses icons and bars while
@@ -43,9 +43,12 @@ interactive hardware session or an assessment of real capacitive-touch sensitivi
 ## Approved button change
 
 Physical BOOT/GPIO0 was the existing light key. PWR remains sleep/power.
-A single press now hides/restores page/card including modal and scroll. Long at
-700ms toggles light once. Single feedback waits 350ms after release to arbitrate
-possible doubles. Double is reserved (no action pending choice). Chord/reset and
+A short release now hides/restores controls and page/card including modal and
+scroll. Only 30ms switch debounce applies; no double gesture or detection delay.
+Long at 700ms toggles light once. Clean view starts unobstructed and maps every
+pixel of the full 640x172 panel into the aquarium, without hidden control hitboxes.
+Fish taps and decoration holds stay in the aquarium while clean view is active. Chord/reset and
 protected pages cancel singles; boot-held keys and bounce do not act. There is no
 hold-progress visual indicator yet; adding one is an optional recommendation.
-No new review recommendations above were applied to production UI.
+Only the subsequently approved two-line scrolling recommendation was applied;
+other review recommendations remain for review.

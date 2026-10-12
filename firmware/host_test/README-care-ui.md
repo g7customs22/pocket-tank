@@ -66,9 +66,12 @@ restores the current page/card, retaining renderer modal and native scroll/picke
 state. From plain aquarium with no remembered page it opens MENU. A captured touch,
 setup or reset confirmation prevents toggling. New navigation/dismissal discards
 remembered page state; tank switching cannot restore a previous tank's card.
-Long hold at 700ms toggles aquarium lighting once. Debounced short presses wait
-350ms after release to distinguish doubles; double is recognized and reserved,
-with no assigned action pending user choice. Existing BOOT-plus-touch reset prompt
+Long hold at 700ms toggles aquarium lighting once. Short release acts after only
+30ms switch debounce. There is no double gesture or detection delay. Clean view
+starts with all controls hidden; the entire 640x172 area shows aquarium pixels and
+routes touches to aquarium interactions, including areas formerly under buttons.
+Fish taps and decoration holds do not reopen panels in clean view. A short press
+restores controls and any remembered page/card, or opens MENU if none was stored. Existing BOOT-plus-touch reset prompt
 is preserved and consumes the gesture. Boot-held keys are ignored until released.
 `button_gestures_host.c` tests the production classifier. The workspace QA fixture
 extracts the production visibility function and verifies hide/restore/protection.

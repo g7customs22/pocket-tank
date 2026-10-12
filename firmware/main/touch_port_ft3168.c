@@ -215,6 +215,10 @@ void touch_port_poll(tank_t *t) {
             else ESP_LOGI(TAG, "setup done: %s + %s", t->fish[0].name, t->fish[1].name);
         }
     }
+    bool clean=false;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    clean=ui349_clean_view(&g_ui349) && !su && !s_cf;
+#endif
     bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat;      /* a page or a prompt owns the glass */
     if (touched) { s_lx = tx; s_ly = ty; if (!modal) tank_touch_drag(t, tx, ty); }  /* stroke = wipe/slash */
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
@@ -223,7 +227,7 @@ void touch_port_poll(tank_t *t) {
     /* tap-and-hold on a decoration (2026-09-24, Strato: "right now it's like 5
        taps to get back to the edit"): a still finger 700 ms on an owned
        piece opens its placement page (MOVE / DEPTH / SELL) right there */
-    if (touched && !modal && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24 && fabsf(ty - s_py) < 24) {
+    if (!clean && touched && !modal && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24 && fabsf(ty - s_py) < 24) {
         int it = tank_decor_hit(t, s_px, s_py);
         if (it >= 0) { setup_begin_place(t, it); s_held_page = true; s_sel = -1;
                        ESP_LOGI(TAG, "held on the %s: placement page up", SD_ITEMS[it].name); }
@@ -257,6 +261,7 @@ void touch_port_poll(tank_t *t) {
 #else
         if (now - s_press_us < 350000 && dx * dx + dy * dy < 24 * 24) {
 #endif
+            if(clean){tank_touch_tap(t,s_px,s_py);goto released;}
             if (notice_current()) { notice_dismiss(); ESP_LOGI(TAG, "tap closed the announcement"); goto released; }
             if (s_set || s_back) { s_back = false; goto released; }   /* the settings page had the glass (render_settings_touch above) */
             if (s_shop) {                                           /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
@@ -312,7 +317,7 @@ void touch_port_poll(tank_t *t) {
                                                   (no feed, no light-toggle burst) */
             else tank_touch_tap(t, s_px, s_py);
         }
-        else if (!s_ms && s_py < 60 && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed */
+        else if (!modal && s_py < 60 && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed */
     }
 released:
     if (!touched) s_held_page = false;
@@ -366,18 +371,21 @@ void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_tim
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 void touch_port_toggle_pages(void){
     if(s_cf||setup_active()||s_down||g_ui349.owner)return; /* Never cut a captured touch/confirmation in half. */
-    if(s_ms||s_set||s_shop||s_bat||s_sel>=0||g_ui349.slots_picker){
-        s_hidden.valid=true;s_hidden.ms=s_ms;s_hidden.set=s_set;s_hidden.shop=s_shop;s_hidden.bat=s_bat;s_hidden.sel=s_sel;
+    if(!g_ui349.controls_hidden){
+        s_hidden.valid=s_ms||s_set||s_shop||s_bat||s_sel>=0||g_ui349.slots_picker;g_ui349.controls_hidden=true;
+        s_hidden.ms=s_ms;s_hidden.set=s_set;s_hidden.shop=s_shop;s_hidden.bat=s_bat;s_hidden.sel=s_sel;
         s_hidden.scroll=g_ui349.scroll;s_hidden.view=g_ui349.view;s_hidden.species=g_ui349.species_picker;
         s_hidden.slots=g_ui349.slots_picker;s_hidden.habitat=g_ui349.habitat_picker;s_hidden.species_page=g_ui349.species_page;
         s_ms=s_set=s_shop=s_bat=false;s_sel=-1;
         g_ui349.species_picker=g_ui349.slots_picker=g_ui349.habitat_picker=false;
+        g_ui349.view=(ui349_view_t){0,"TANK",true,0};g_ui349.scroll=0;
     }else if(s_hidden.valid){
+        g_ui349.controls_hidden=false;
         s_ms=s_hidden.ms;s_set=s_hidden.set;s_shop=s_hidden.shop;s_bat=s_hidden.bat;s_sel=s_hidden.sel;
         s_sel_us=s_bat_us=esp_timer_get_time();g_ui349.view=s_hidden.view;g_ui349.scroll=s_hidden.scroll;
         g_ui349.species_picker=s_hidden.species;g_ui349.slots_picker=s_hidden.slots;
         g_ui349.habitat_picker=s_hidden.habitat;g_ui349.species_page=s_hidden.species_page;s_hidden.valid=false;
-    }else s_ms=true;
+    }else {g_ui349.controls_hidden=false;s_ms=true;}
     g_ui349.owner=0;s_back=false;s_held_page=false;
 }
 int touch_port_take_slot(void){int s=s_slot_request;s_slot_request=-1;return s;}
