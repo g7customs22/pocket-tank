@@ -1,3 +1,4 @@
+#include "clock_policy.h"
 #include "slot_system.h"
 #include "slot_journal.h"
 #include "progression.h"
@@ -72,8 +73,8 @@ int slot_system_boot(tank_t *tank){
     int64_t now=clock_port_now_unix();
     /* Only selected tank advances through sleep/offline absence. Inactive
      * snapshots are never loaded here and never receive an elapsed interval. */
-    if(now>buffer->saved_unix&&buffer->saved_unix>0){
-        int64_t dt=now-buffer->saved_unix;if(dt>PROGRESSION_SLEEP_CAP_S)dt=PROGRESSION_SLEEP_CAP_S;
+    int64_t dt=clock_offline_seconds(now,buffer->saved_unix,PROGRESSION_SLEEP_CAP_S);
+    if(dt>0){
         progression_slept(live,(float)dt);
     }
     progression_woke(live);

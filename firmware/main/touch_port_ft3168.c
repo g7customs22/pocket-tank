@@ -157,7 +157,7 @@ void touch_port_poll(tank_t *t) {
         else if(action==UI349_UNDO)s_slot_request=-2;
         else if(action==UI349_TANKS_BACK) g_ui349.slots_picker=false;
         else if(action==UI349_TANK_STYLE) {g_ui349.slots_picker=false;g_ui349.habitat_picker=true;}
-        else if(action>=UI349_SLOT_PICK&&action<UI349_SLOT_PICK+3) s_slot_request=action-UI349_SLOT_PICK;
+        else if(action>=UI349_SLOT_PICK&&action<UI349_SLOT_PICK+3) s_slot_request=ui349_slot_request(&g_ui349,action);
         else if(action==UI349_HABITAT) g_ui349.habitat_picker=true;
         else if(action==UI349_HABITAT_BACK) g_ui349.habitat_picker=false;
         else if(action>=UI349_HABITAT_PICK && action<UI349_HABITAT_PICK+HABITAT_COUNT) {
@@ -261,7 +261,8 @@ void touch_port_poll(tank_t *t) {
 #else
         if (now - s_press_us < 350000 && dx * dx + dy * dy < 24 * 24) {
 #endif
-            if(clean){tank_touch_tap(t,s_px,s_py);goto released;}
+            /* Hidden controls suppress overlays, not creature selection. */
+            if(clean) goto select_creature;
             if (notice_current()) { notice_dismiss(); ESP_LOGI(TAG, "tap closed the announcement"); goto released; }
             if (s_set || s_back) { s_back = false; goto released; }   /* the settings page had the glass (render_settings_touch above) */
             if (s_shop) {                                           /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
@@ -290,6 +291,7 @@ void touch_port_poll(tank_t *t) {
                 ESP_LOGI(TAG, "card tap at %.0f,%.0f -> milestones", s_px, s_py);         under its MORE button) = milestones page */
                 s_ms = true; goto released;
             }
+select_creature:;
             /* fish first; only an empty tap reaches the water. 38 px radius
                (a fingertip on this 322 ppi panel covers ~60 px) against BOTH
                the press-time snapshot and the current position - whichever is
@@ -385,7 +387,7 @@ void touch_port_toggle_pages(void){
         s_sel_us=s_bat_us=esp_timer_get_time();g_ui349.view=s_hidden.view;g_ui349.scroll=s_hidden.scroll;
         g_ui349.species_picker=s_hidden.species;g_ui349.slots_picker=s_hidden.slots;
         g_ui349.habitat_picker=s_hidden.habitat;g_ui349.species_page=s_hidden.species_page;s_hidden.valid=false;
-    }else {g_ui349.controls_hidden=false;s_ms=true;}
+    }else {g_ui349.controls_hidden=false;s_ms=false;}
     g_ui349.owner=0;s_back=false;s_held_page=false;
 }
 int touch_port_take_slot(void){int s=s_slot_request;s_slot_request=-1;return s;}

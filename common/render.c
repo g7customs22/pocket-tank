@@ -3470,12 +3470,16 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     } else {
         /* MANUAL: how to work the light instead */
 #ifdef POCKET_TANK_WIDE_V1
-        draw_text(&c, SET_LABEL_X, SET_NUM_Y - 8, 2, MSP_TEAL, "PRESS BOOT BUTTON TO");
+        draw_text(&c, SET_LABEL_X, SET_NUM_Y - 8, 2, MSP_TEAL, "SINGLE BOOT PRESS TO");
 #else
         draw_text(&c, SET_LABEL_X, SET_NUM_Y - 8, 2, MSP_TEAL, "DOUBLE-TAP THE GLASS TO");
 #endif
         draw_text(&c, SET_LABEL_X, SET_NUM_Y + 14, 2, MSP_TEAL, "TURN THE LIGHT ON OR OFF");
     }
+#ifdef POCKET_TANK_WIDE_V1
+    draw_text(&c, SET_LABEL_X, 310, 2, MSP_TEAL, "HOLD BOOT: CONTROLS");
+    draw_text(&c, SET_LABEL_X, 330, 2, MSP_TEAL, "DOUBLE BOOT: WHITE / UV");
+#endif
     /* the firmware version, hugging the bottom left of the frame (6 px up,
        on the labels' x; the bezel's curve is clear there), small (8 px) and
        dim: it is for the keeper who asks "how do I update?", not for

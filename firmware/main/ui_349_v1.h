@@ -74,6 +74,11 @@ static inline void ui349_contact(ui349_contact_t *s, int64_t now, bool *down, ui
 }
 
 enum { UI349_PASS, UI349_CONSUMED, UI349_MENU, UI349_SETTINGS, UI349_SHOP, UI349_CLOSE, UI349_NEXT, UI349_SPECIES, UI349_SPECIES_BACK, UI349_HABITAT=20, UI349_HABITAT_BACK, UI349_TANKS, UI349_TANKS_BACK, UI349_TANK_STYLE, UI349_SPECIES_PREV, UI349_SPECIES_NEXT, UI349_UNDO, UI349_SLOT_PICK=300, UI349_SPECIES_PICK=100, UI349_HABITAT_PICK=200 };
+/* Active tank taps are consumed by the rail, but never dispatch a switch. */
+static inline int ui349_slot_request(const ui349_state_t *s,int action){
+    int slot=action-UI349_SLOT_PICK;
+    return slot>=0&&slot<3&&(unsigned)slot!=s->active_slot?slot:-1;
+}
 /* Classify movement in screen pixels, independent of aquarium scale. */
 static inline bool ui349_tap(bool world, bool modal, int64_t elapsed_us, float dx, float dy) {
     if (world) { dx *= (float)(TANK_W * UI349_H / TANK_H - 1) / (TANK_W - 1); dy *= (float)(UI349_H - 1) / (TANK_H - 1); }
