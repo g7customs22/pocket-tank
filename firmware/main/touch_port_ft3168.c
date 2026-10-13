@@ -352,6 +352,9 @@ select_creature:;
             for (int i = 0; i < t->n_fish; i++) {
                 float ax = s_fx[i] - s_px, ay = s_fy[i] - s_py;
                 float bx = t->fish[i].x - s_px, by = t->fish[i].y - s_py;
+#ifdef POCKET_WORLD_PROTO
+                if(s_press_world&&t->fish[i].glass_attached){float mx,my,gx,gy;wp_origin(&g_ui349.world_camera,1,&mx,&my);wp_origin(&g_ui349.world_camera,2,&gx,&gy);bx+=mx-gx;by+=my-gy;}
+#endif
                 float d2a = ax * ax + ay * ay, d2b = bx * bx + by * by;
                 float d2 = d2a < d2b ? d2a : d2b;
                 if (d2 < bd) { bd = d2; best = i; }
