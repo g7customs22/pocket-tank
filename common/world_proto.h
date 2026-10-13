@@ -4,6 +4,9 @@
 #include "tank.h"
 #define WP_W 640
 #define WP_H 172
+#define WP_SCALE 2
+#define WP_VIEW_W (WP_W * WP_SCALE)
+#define WP_VIEW_H (WP_H * WP_SCALE)
 typedef struct { float x,y,neutral_roll,neutral_pitch; bool ready,frozen; int64_t last_sample; unsigned rejected; } wp_camera_t;
 typedef struct { uint16_t id; float x,y; } wp_source_t;
 void wp_camera_init(wp_camera_t *c);
@@ -26,4 +29,7 @@ int wp_hit(const wp_camera_t *c,const wp_objects_t *o,float sx,float sy,int prev
 void wp_wipe(tank_t *t,const wp_camera_t *c,float sx0,float sy0,float sx1,float sy1);
 void tank_proto_wipe(tank_t *t,float x0,float y0,float x1,float y1);
 void render_world_proto(const tank_t *t,const wp_objects_t *o,const wp_camera_t *camera,uint16_t *fb);
+#ifndef ESP_PLATFORM
+void render_world_reference(const tank_t *t,const wp_objects_t *o,const wp_camera_t *camera,uint16_t *fb);
+#endif
 #endif

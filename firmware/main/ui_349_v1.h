@@ -105,7 +105,7 @@ static inline bool ui349_tap(bool world, bool modal, int64_t elapsed_us, float d
     #ifndef POCKET_WORLD_PROTO
     if (world) { dx *= (float)(TANK_W * UI349_H / TANK_H - 1) / (TANK_W - 1); dy *= (float)(UI349_H - 1) / (TANK_H - 1); }
 #else
-    (void)world;
+    if(world&&!modal){dx/=WP_SCALE;dy/=WP_SCALE;}
 #endif
     return elapsed_us < (modal ? 800000 : 350000) && dx*dx + dy*dy < 24*24;
 }

@@ -1,7 +1,7 @@
 /* Native viewport-only proof renderer, reusing the production vector assets.
  * No full-world framebuffer or new glow/postprocess allocation. */
 #include "world_proto.h"
-static ctx_t wp_ctx(uint16_t *fb,const wp_camera_t *camera,int depth,float dim){float x,y;wp_origin(camera,depth,&x,&y);ctx_t c={fb,WP_W,dim,(int)x,(int)y,WP_W,WP_H};return c;}
+static ctx_t wp_ctx(uint16_t *fb,const wp_camera_t *camera,int depth,float dim,bool reference){float x,y;wp_origin(camera,depth,&x,&y);ctx_t c={fb,reference?WP_VIEW_W:WP_W,dim,(int)x,(int)y,WP_VIEW_W,WP_VIEW_H,false,0,reference?0:1};return c;}
 static void wp_draw_item(ctx_t *c,const tank_t *t,int item,float x,float scale,unsigned id){
  if(x+100<c->ox||x-100>c->ox+c->w)return;
  if(item==WP_AIRSTONE){fill_ellipse(c,x,TANK_H-19,12,5,0x72a3ad,255);return;}
@@ -20,13 +20,14 @@ static void wp_draw_item(ctx_t *c,const tank_t *t,int item,float x,float scale,u
  else if(item==3)draw_coral(c,(int)x,tank_coral_rgb(t),tank_coral_growth(t),false);
  else if(item==4)draw_cluster(c,(int)x,tank_cluster_scheme(t),tank_cluster_growth(t),false);
 }
-void render_world_proto(const tank_t *t,const wp_objects_t *o,const wp_camera_t *camera,uint16_t *fb){
+static void render_world_view(const tank_t *t,const wp_objects_t *o,const wp_camera_t *camera,uint16_t *fb,bool reference){
  uint32_t *old_dirty=g_dirty;g_dirty=NULL;g_veg_mask_cx=-1;
  bool uv=t->uv.style==1&&!t->night;
  if(g_habitat!=t->habitat||g_uv_scene!=uv)g_veg_row_dim=g_castle_dim=g_coral_dim=g_cl_dim=-1;
  g_uv_scene=uv;g_uv_material=false;g_habitat=t->habitat;
- float dim=t->night?.45f:1.f;ctx_t far=wp_ctx(fb,camera,0,dim*.65f),mid=wp_ctx(fb,camera,1,dim),front=wp_ctx(fb,camera,2,dim);
- for(int y=0;y<WP_H;y++){uint16_t col=rgb565(water_rgb(y+mid.oy),dim);for(int x=0;x<WP_W;x++)fb[y*WP_W+x]=col;}
+ int width=reference?WP_VIEW_W:WP_W,height=reference?WP_VIEW_H:WP_H,step=reference?1:WP_SCALE;
+ float dim=t->night?.45f:1.f;ctx_t far=wp_ctx(fb,camera,0,dim*.65f,reference),mid=wp_ctx(fb,camera,1,dim,reference),front=wp_ctx(fb,camera,2,dim,reference);
+ for(int y=0;y<height;y++){uint16_t col=rgb565(water_rgb(y*step+mid.oy),dim);for(int x=0;x<width;x++)fb[y*width+x]=col;}
  /* Distant ridge and tall reed silhouettes make the far plane legible. */
  for(int k=0;k<12;k++){float x=60+k*120;fill_ellipse(&far,x,TANK_H-32,93,35,k%2?0x1b4146:0x25474c,255);
   for(int j=0;j<4;j++)fill_ellipse(&far,x-30+j*20,TANK_H-95-(k%3)*26,5,80+(j%2)*30,uv?0x25495c:0x285d55,255);}
@@ -45,12 +46,16 @@ void render_world_proto(const tank_t *t,const wp_objects_t *o,const wp_camera_t 
    for(int i=0;i<MAX_FOOD;i++)if(t->food[i].alive){fill_ellipse(c,t->food[i].x,t->food[i].y,2.6f,2.6f,0xffbd59,255);}
    draw_snail(c,t,true);
    if(t->sd_unlocks&SD_ITEM_SHRIMP){src_t pal[SHRIMP_TONES];for(int k=0;k<SHRIMP_TONES;k++)pal[k]=src_color(SHRIMP_RGB[k],c->dim);for(int i=0;i<t->shrimp_n;i++)draw_shrimp(c,&t->shrimp[i],pal);}
-   for(int i=0;i<t->n_fish;i++){const fish_t *f=&t->fish[i];if(!f->glass_attached&&f->x+65>=c->ox&&f->x-65<c->ox+WP_W&&f->y+40>=c->oy&&f->y-40<c->oy+WP_H)draw_fish(c,t,f);}
+   for(int i=0;i<t->n_fish;i++){const fish_t *f=&t->fish[i];if(!f->glass_attached&&f->x+65>=c->ox&&f->x-65<c->ox+WP_VIEW_W&&f->y+40>=c->oy&&f->y-40<c->oy+WP_VIEW_H)draw_fish(c,t,f);}
   }
  }
  draw_algae(&front,t);draw_snail(&front,t,false);
  for(int i=0;i<t->n_fish;i++)if(t->fish[i].glass_attached)draw_fish(&front,t,&t->fish[i]);
  /* Subtle fixed glass border provides a stable reference during motion. */
- ctx_t screen={fb,WP_W,1,0,0,WP_W,WP_H};rect_fill(&screen,0,0,WP_W,1,0x254657);rect_fill(&screen,0,WP_H-1,WP_W,1,0x112c39);
+ ctx_t screen={fb,width,1,0,0,width,height};rect_fill(&screen,0,0,width,1,0x254657);rect_fill(&screen,0,height-1,width,1,0x112c39);
  g_dirty=old_dirty;
 }
+void render_world_proto(const tank_t *t,const wp_objects_t *o,const wp_camera_t *camera,uint16_t *fb){render_world_view(t,o,camera,fb,false);}
+#ifndef ESP_PLATFORM
+void render_world_reference(const tank_t *t,const wp_objects_t *o,const wp_camera_t *camera,uint16_t *fb){render_world_view(t,o,camera,fb,true);}
+#endif

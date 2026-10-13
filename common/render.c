@@ -19,15 +19,15 @@
 /* a draw target: fb + stride + night dim, plus the window it covers in tank
  * coordinates (ox,oy,w,h) - the frame is (0,0,TANK_W,TANK_H); the stats card
  * cache is a small sprite that still gets drawn in tank coordinates */
-typedef struct { uint16_t *fb; int stride; float dim; int ox, oy, w, h; bool monochrome; uint16_t ink; } ctx_t;
+typedef struct { uint16_t *fb; int stride; float dim; int ox, oy, w, h; bool monochrome; uint16_t ink; unsigned shrink; } ctx_t;
 static ctx_t ctx_full(uint16_t *fb, int stride, float dim) {
     ctx_t c = { fb, stride, dim, 0, 0, TANK_UI_W, TANK_H }; return c;
 }
 static ctx_t ctx_world(uint16_t *fb, int stride, float dim) {
     ctx_t c = { fb, stride, dim, 0, 0, TANK_W, TANK_H }; return c;
 }
-#define CTX_IN(c, x, y) ((unsigned)((x) - (c)->ox) < (unsigned)(c)->w && (unsigned)((y) - (c)->oy) < (unsigned)(c)->h)
-#define CTX_PX(c, x, y) ((c)->fb[((y) - (c)->oy) * (c)->stride + ((x) - (c)->ox)])
+#define CTX_IN(c, x, y) ((unsigned)((x) - (c)->ox) < (unsigned)(c)->w && (unsigned)((y) - (c)->oy) < (unsigned)(c)->h && (!(c)->shrink || !((((x)-(c)->ox) | ((y)-(c)->oy))&1)))
+#define CTX_PX(c, x, y) ((c)->fb[(((y) - (c)->oy) >> (c)->shrink) * (c)->stride + (((x) - (c)->ox) >> (c)->shrink)])
 
 /* Dirty mask (2026-09-01): one bit per pixel, set by everything drawn over
  * the baked scene (px, span, blends), cleared every frame. The porthole
@@ -131,15 +131,18 @@ static void px_blend(ctx_t *c, int x, int y, uint32_t rgb, int a) {
 /* horizontal span [x0,x1] on row y, clipped to the frame, pre-dimmed source */
 static inline void span(ctx_t *c, int x0, int x1, int y, const src_t *s, int alpha) {
     if ((unsigned)(y - c->oy) >= (unsigned)c->h) return;
+    if(c->shrink && ((y-c->oy)&1))return;
     if (x0 < c->ox) x0 = c->ox;
     if (x1 > c->ox + c->w - 1) x1 = c->ox + c->w - 1;
+    if(c->shrink)x0+=(x0-c->ox)&1;
     if (x0 > x1) return;
     bb_add(x0, x1, y);
     dirty_span(x0, x1, y);
     uint16_t *p = &CTX_PX(c, x0, y);
-    if (c->monochrome) { if (alpha > 0) for (int x = x0; x <= x1; x++) *p++ = c->ink; }
-    else if (alpha >= 255) for (int x = x0; x <= x1; x++) *p++ = s->v;
-    else              for (int x = x0; x <= x1; x++) blend565(p++, s, alpha);
+    int step=1<<c->shrink;
+    if (c->monochrome) { if (alpha > 0) for (int x = x0; x <= x1; x+=step) *p++ = c->ink; }
+    else if (alpha >= 255) for (int x = x0; x <= x1; x+=step) *p++ = s->v;
+    else              for (int x = x0; x <= x1; x+=step) blend565(p++, s, alpha);
 }
 
 /* row half-width of a unit circle at |t| = k/64: sqrt(1 - t^2), tabled -
@@ -515,6 +518,7 @@ static inline void px_darken(uint16_t *p, int a) {
 /* a span that is FINAL: blended, then vignetted right here, and NOT marked
  * dirty, so the re-apply sweep never touches it (scene cache mode only) */
 static inline void span_final(ctx_t *c, int x0, int x1, int y, const src_t *s, int alpha) {
+    if(c->shrink){span(c,x0,x1,y,s,alpha);return;} /* native view has no vignette pass */
     if ((unsigned)(y - c->oy) >= (unsigned)c->h) return;
     if (x0 < c->ox) x0 = c->ox;
     if (x1 > c->ox + c->w - 1) x1 = c->ox + c->w - 1;
