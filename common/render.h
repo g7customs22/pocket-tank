@@ -241,3 +241,5 @@ int render_shop_focus(void);
 void render_extra_preview(uint16_t *fb,int stride,int item,int x,int y,float clock);
 
 #endif
+
+void render_sd_toast_native(const tank_t *t,uint16_t *fb,int stride);

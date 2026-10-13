@@ -2,10 +2,20 @@
  * No full-world framebuffer or new glow/postprocess allocation. */
 #include "world_proto.h"
 static ctx_t wp_ctx(uint16_t *fb,const wp_camera_t *camera,int depth,float dim){float x,y;wp_origin(camera,depth,&x,&y);ctx_t c={fb,WP_W,dim,(int)x,(int)y,WP_W,WP_H};return c;}
-static void wp_draw_item(ctx_t *c,const tank_t *t,int item,float x,float scale){
+static void wp_draw_item(ctx_t *c,const tank_t *t,int item,float x,float scale,unsigned id){
  if(x+100<c->ox||x-100>c->ox+c->w)return;
  if(item==WP_AIRSTONE){fill_ellipse(c,x,TANK_H-19,12,5,0x72a3ad,255);return;}
- if(item>=EXTRA_DECOR_FIRST)draw_extra(c,item,x,TANK_H-14,t->clock,scale,false);
+ if(item==7&&t->night){
+  bool old=g_uv_material;g_uv_material=false;float dim=c->dim;c->dim=1;
+  fill_ellipse(c,x-9*scale,TANK_H-43*scale,9*scale,10*scale,0x65a58e,45);
+  fill_ellipse(c,x+10*scale,TANK_H-42*scale,9*scale,10*scale,0x65a58e,45);
+  c->dim=dim;g_uv_material=old;
+ }
+ if(item>=EXTRA_DECOR_FIRST)draw_extra(c,item,x,TANK_H-14,t->clock+id*2.713f,scale,true);
+ if(item==7&&t->night){bool old=g_uv_material;g_uv_material=false;float dim=c->dim;c->dim=1;
+  fill_ellipse(c,x-9*scale,TANK_H-14-29*scale,5*scale,6*scale,0x76b99b,170);
+  fill_ellipse(c,x+10*scale,TANK_H-14-28*scale,5*scale,6*scale,0x76b99b,170);
+  fill_ellipse(c,x+scale,TANK_H-14-18*scale,2*scale,3*scale,0x76b99b,125);c->dim=dim;g_uv_material=old;}
  else if(item==2){draw_castle(c,(int)x,0,false);draw_castle(c,(int)x,1,false);}
  else if(item==3)draw_coral(c,(int)x,tank_coral_rgb(t),tank_coral_growth(t),false);
  else if(item==4)draw_cluster(c,(int)x,tank_cluster_scheme(t),tank_cluster_growth(t),false);
@@ -26,16 +36,20 @@ void render_world_proto(const tank_t *t,const wp_objects_t *o,const wp_camera_t 
    for(int x=0;x<TANK_W;x+=9)fill_ellipse(c,x,TANK_H-10,7,4,0x435243,255);
    for(int bed=0;bed<tank_veg_beds(t);bed++)draw_veg(c,t,bed,bed*13+1,-1,false);
   }
-  for(int item=2;item<SD_ITEM_COUNT;item++)if(item!=5&&(t->sd_unlocks&(1u<<item))&&tank_decor_z(t,item)==d)wp_draw_item(c,t,item,tank_decor_x(t,item),1);
-  for(int i=0;i<WP_COPIES;i++){const wp_copy_t *p=&o->saved.copy[i];if(p->id&&p->depth==d)wp_draw_item(c,t,p->item,p->x,d==2?1.12f:1.f);}
+  for(int item=2;item<SD_ITEM_COUNT;item++)if(item!=5&&(t->sd_unlocks&(1u<<item))&&tank_decor_z(t,item)==d)wp_draw_item(c,t,item,tank_decor_x(t,item),1,(unsigned)item+100);
+  for(int i=0;i<WP_COPIES;i++){const wp_copy_t *p=&o->saved.copy[i];if(p->id&&p->depth==d)wp_draw_item(c,t,p->item,p->x,d==2?1.12f:1.f,p->id);}
   if(d==1){
    wp_source_t src[WP_SOURCES];int n=wp_sources(t,o,src);
-   for(int k=0;k<MAX_BUBBLE;k++){int i=k%n;float yy=TANK_H-23-fmodf(t->clock*(20+k%7)+k*47,TANK_H-30);float xx=src[i].x+sinf(t->clock+k)*6;
+   for(int k=0;k<MAX_BUBBLE;k++){int i=k%n;bool chest=src[i].id==1;for(int j=0;j<WP_COPIES;j++)if(o->saved.copy[j].id==src[i].id&&o->saved.copy[j].item==8)chest=true;if(chest)continue;float yy=TANK_H-23-fmodf(t->clock*(20+k%7)+k*47,TANK_H-30);float xx=src[i].x+sinf(t->clock+k)*6;
     fill_ellipse(c,xx,yy,1.5f+k%2,2,uv?0x958cee:0x8acbd7,110);}
-   for(int i=0;i<t->n_fish;i++){const fish_t *f=&t->fish[i];if(f->x+65>=c->ox&&f->x-65<c->ox+WP_W&&f->y+40>=c->oy&&f->y-40<c->oy+WP_H)draw_fish(c,t,f);}
+   for(int i=0;i<MAX_FOOD;i++)if(t->food[i].alive){fill_ellipse(c,t->food[i].x,t->food[i].y,2.6f,2.6f,0xffbd59,255);}
+   draw_snail(c,t,true);
+   if(t->sd_unlocks&SD_ITEM_SHRIMP){src_t pal[SHRIMP_TONES];for(int k=0;k<SHRIMP_TONES;k++)pal[k]=src_color(SHRIMP_RGB[k],c->dim);for(int i=0;i<t->shrimp_n;i++)draw_shrimp(c,&t->shrimp[i],pal);}
+   for(int i=0;i<t->n_fish;i++){const fish_t *f=&t->fish[i];if(!f->glass_attached&&f->x+65>=c->ox&&f->x-65<c->ox+WP_W&&f->y+40>=c->oy&&f->y-40<c->oy+WP_H)draw_fish(c,t,f);}
   }
  }
- draw_algae(&front,t);
+ draw_algae(&front,t);draw_snail(&front,t,false);
+ for(int i=0;i<t->n_fish;i++)if(t->fish[i].glass_attached)draw_fish(&front,t,&t->fish[i]);
  /* Subtle fixed glass border provides a stable reference during motion. */
  ctx_t screen={fb,WP_W,1,0,0,WP_W,WP_H};rect_fill(&screen,0,0,WP_W,1,0x254657);rect_fill(&screen,0,WP_H-1,WP_W,1,0x112c39);
  g_dirty=old_dirty;

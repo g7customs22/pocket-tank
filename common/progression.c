@@ -3,6 +3,9 @@
 #endif
 #include "progression.h"
 #include "clock_policy.h"
+#ifdef POCKET_WORLD_PROTO
+#include "world_proto.h"
+#endif
 #include "version.h"
 #include <stddef.h>
 #include <string.h>
@@ -127,6 +130,9 @@ typedef struct {
     uint8_t fish_species[N_FISH_MAX];
     uint8_t habitat; /* Previously reserved zero byte: old saves remain Classic. */
     tank_uv_t uv; /* optional v5 cosmetic tail; absent in old NVS saves */
+#ifdef POCKET_WORLD_PROTO
+    _Alignas(8) wp_saved_t world;
+#endif
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -217,7 +223,12 @@ SAVE_AT(extra_decor_x, 1672);
 SAVE_AT(extra_decor_z1, 1692);
 SAVE_AT(fish_species, 1697);
 SAVE_AT(habitat, 1703);
-_Static_assert(offsetof(save_t,uv)==1704 && sizeof(save_t)==1720, "UV append-only tail layout");
+_Static_assert(offsetof(save_t,uv)==1704, "UV prefix unchanged");
+#ifdef POCKET_WORLD_PROTO
+_Static_assert(offsetof(save_t,world)==1720 && sizeof(save_t)==1784,"v6 world tail");
+#else
+_Static_assert(sizeof(save_t)==1720,"v5 tail");
+#endif
 #define SAVE_NVS_BUDGET 4000
 _Static_assert(sizeof(save_t) <= SAVE_NVS_BUDGET, "the save outgrew its NVS budget - see the math above");
 
@@ -340,6 +351,9 @@ static void sd_tick(tank_t *t) {
 int progression_sell_value(int item) { return item < 0 || item >= SD_ITEM_COUNT ? 0 : SD_ITEMS[item].price * SD_SELL_PCT / 100; }
 bool progression_sell(tank_t *t, int item) {
     if (item < 0 || item >= SD_ITEM_COUNT || !tank_decor_placeable(item)) return false;   /* the snail stays */
+#ifdef POCKET_WORLD_PROTO
+    if(item==8){wp_source_t sources[WP_SOURCES];if(wp_sources(t,&t->world,sources)>=WP_SOURCES)return false;}
+#endif
     const sd_item_t *it = &SD_ITEMS[item];
     if (!(t->sd_unlocks & it->bit)) return false;
     t->sd_unlocks &= ~it->bit;
@@ -819,6 +833,9 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */
     }
+#ifdef POCKET_WORLD_PROTO
+    if(!wp_valid(&sv.world))return false;
+#endif
     *saved_unix = sv.saved_unix;
     s_loaded_release = sv.saved_release;
     t->n_fish = 0;
@@ -861,6 +878,9 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     memcpy(t->algae, sv.algae, ALGAE_CELLS);
     t->trims = sv.trims; t->cells_cleaned = sv.cells_cleaned;
     t->uv=sv.uv;t->uv.style=t->uv.style==1;
+#ifdef POCKET_WORLD_PROTO
+    memset(&t->world,0,sizeof t->world);t->world.saved=sv.world;
+#endif
     t->habitat=sv.habitat<HABITAT_COUNT?sv.habitat:HABITAT_CLASSIC;
     /* the sand dollar tail (zeros for an older save: the ledger back-pays) */
     t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned; t->sd_unlocks = sv.sd_unlocks & ((1u << SD_ITEM_COUNT) - 1);
@@ -1109,6 +1129,9 @@ bool progression_save(tank_t *t) {
     memcpy(sv.fish_species,t->fish_species,sizeof sv.fish_species);
     sv.habitat=t->habitat<HABITAT_COUNT?t->habitat:HABITAT_CLASSIC;
     sv.uv=t->uv;
+#ifdef POCKET_WORLD_PROTO
+    sv.world=t->world.saved;
+#endif
     sv.shrimp_n = (t->sd_unlocks & SD_ITEM_SHRIMP) ? t->shrimp_n : 0; sv.shrimp_food = t->shrimp_food;
     sv.shrimp_cool = t->shrimp_cool > 0 ? t->shrimp_cool : 0; sv.shrimp_eaten = t->shrimp_eaten;
     sv.setup_pending = s_setup_pending;

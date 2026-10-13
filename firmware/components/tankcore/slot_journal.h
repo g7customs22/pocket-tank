@@ -16,9 +16,10 @@ typedef struct {
     bool (*erase)(void *,uint32_t,size_t);
 } sj_io_t;
 typedef struct { uint32_t active, present; } sj_meta_t;
-typedef struct { sj_io_t io; sj_meta_t meta; uint32_t schema,legacy_schema; size_t legacy_length; bool (*upgrade)(void *,size_t,size_t); unsigned char *scratch; size_t capacity; } sj_t;
+typedef struct { sj_io_t io; sj_meta_t meta; uint32_t schema,legacy_schema,legacy2_schema; size_t legacy_length,legacy2_length; bool (*upgrade)(void *,size_t,size_t); unsigned char *scratch; size_t capacity; } sj_t;
 bool sj_mount(sj_t *,sj_io_t,uint32_t schema,void *scratch,size_t capacity);
 bool sj_mount_compat(sj_t *,sj_io_t,uint32_t,uint32_t,size_t,bool (*)(void *,size_t,size_t),void *,size_t);
+bool sj_mount_compat2(sj_t *,sj_io_t,uint32_t,uint32_t,size_t,uint32_t,size_t,bool (*)(void *,size_t,size_t),void *,size_t);
 bool sj_load(sj_t *,unsigned slot,void *data,size_t len);
 bool sj_save(sj_t *,unsigned slot,const void *data,size_t len);
 bool sj_activate(sj_t *,unsigned slot);

@@ -1,4 +1,5 @@
 #include "clock_policy.h"
+#include "world_proto.h"
 #include "slot_system.h"
 #include "slot_journal.h"
 #include "progression.h"
@@ -9,23 +10,24 @@
 /* Storage+0..0x5fff belongs to NVS rescue. This separate arena is claimed
  * only if erased, or reopened with its own validated versioned journal. */
 #define ARENA_BASE 0x10000u
-#define SCHEMA 0x00010005u
-#define LEGACY_SCHEMA 0x00010004u
+#define SCHEMA 0x00010006u
+#define LEGACY_SCHEMA 0x00010005u
 typedef struct { tank_t tank; progression_context_t progression; int64_t saved_unix; } snapshot_t;
+typedef struct { unsigned char tank[offsetof(tank_t,world)]; progression_context_t progression; int64_t saved_unix; } legacy_snapshot_t;
+typedef struct { unsigned char tank[offsetof(tank_t,uv)]; progression_context_t progression; int64_t saved_unix; } legacy4_snapshot_t;
 _Static_assert(sizeof(snapshot_t)<SJ_PAYLOAD_MAX,"snapshot exceeds bank");
 #ifdef ESP_PLATFORM
-_Static_assert(offsetof(tank_t,uv)==3976 && sizeof(tank_t)==3992 && sizeof(progression_context_t)==88 && sizeof(snapshot_t)==4088,
-               "Bump slot schema and provide migration before changing persisted layouts");
+_Static_assert(offsetof(tank_t,uv)==3976 && offsetof(tank_t,world)==3992 && sizeof(tank_t)==4072 && sizeof(snapshot_t)==4168,"v6 layout moved");
+_Static_assert(sizeof(legacy_snapshot_t)==4088 && sizeof(legacy4_snapshot_t)==4072,"legacy layout moved");
 #endif
-/* Legacy prefix remains exact; a verified old record is upgraded in RAM only.
- * Journal writes use inactive banks/header-last and retain prior verified data. */
-typedef struct { unsigned char tank[offsetof(tank_t,uv)]; progression_context_t progression; int64_t saved_unix; } legacy_snapshot_t;
 static bool upgrade_snapshot(void *data,size_t old_len,size_t new_len){
-    if(old_len!=sizeof(legacy_snapshot_t)||new_len!=sizeof(snapshot_t))return false;
-    legacy_snapshot_t *old=data;snapshot_t *now=data;
-    progression_context_t progression=old->progression;int64_t saved=old->saved_unix;
-    memset((unsigned char *)data+offsetof(tank_t,uv),0,sizeof(snapshot_t)-offsetof(tank_t,uv));
-    now->progression=progression;now->saved_unix=saved;return true;
+    if(new_len!=sizeof(snapshot_t))return false;
+    size_t prefix; progression_context_t ctx;int64_t stamp;
+    if(old_len==sizeof(legacy_snapshot_t)){legacy_snapshot_t *s=data;prefix=sizeof s->tank;ctx=s->progression;stamp=s->saved_unix;}
+    else if(old_len==sizeof(legacy4_snapshot_t)){legacy4_snapshot_t *s=data;prefix=sizeof s->tank;ctx=s->progression;stamp=s->saved_unix;}
+    else return false;
+    memset((unsigned char *)data+prefix,0,new_len-prefix);
+    snapshot_t *s=data;s->progression=ctx;s->saved_unix=stamp;return true;
 }
 static sj_t journal;
 static const esp_partition_t *partition;
@@ -43,7 +45,7 @@ static void capture(snapshot_t *s){
     s->tank.tap_count=0;
     for(int i=0;i<N_FISH_MAX;i++)s->tank.fish[i].model_name=NULL;
 }
-static bool valid(const snapshot_t *s){return s->tank.n_fish>=2&&s->tank.n_fish<=N_FISH_MAX&&s->tank.habitat<HABITAT_COUNT;}
+static bool valid(const snapshot_t *s){return s->tank.n_fish>=2&&s->tank.n_fish<=N_FISH_MAX&&s->tank.habitat<HABITAT_COUNT&&wp_valid(&s->tank.world.saved);}
 static void restore(const snapshot_t *s){*live=s->tank;
     for(int i=0;i<live->n_fish;i++)live->fish[i].model_name=TRAINED_NAMES[i%N_TRAINED_NAMES];
     progression_context_restore(&s->progression);}
@@ -64,7 +66,7 @@ int slot_system_boot(tank_t *tank){
     rollback=heap_caps_calloc(1,sizeof *rollback,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     void *scratch=heap_caps_malloc(SJ_BANK,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!buffer||!rollback||!scratch)return -1;
-    if(!sj_mount_compat(&journal,(sj_io_t){0,rd,wr,er},SCHEMA,LEGACY_SCHEMA,sizeof(legacy_snapshot_t),upgrade_snapshot,scratch,SJ_BANK)){
+    if(!sj_mount_compat2(&journal,(sj_io_t){0,rd,wr,er},SCHEMA,LEGACY_SCHEMA,sizeof(legacy_snapshot_t),0x00010004u,sizeof(legacy4_snapshot_t),upgrade_snapshot,scratch,SJ_BANK)){
         ESP_LOGE("slots","storage ownership/version/integrity check failed; no formatting, saves blocked");return -1;
     }
     if(!journal.meta.present){blocked=false;return 0;}

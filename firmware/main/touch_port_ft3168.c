@@ -21,6 +21,9 @@
 #include "audio_port.h"
 #include "progression.h"
 #include "sdkconfig.h"
+#ifdef POCKET_WORLD_PROTO
+#include "imu_port.h"
+#endif
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 #include "board_waveshare_349_v1.h"
 #include "viewport_349_v1.h"
@@ -58,8 +61,15 @@ static bool s_bat; static int64_t s_bat_us;       /* the battery page up, and si
 #define CONFIRM_TIMEOUT_US (20LL * 1000000)
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 static int s_slot_request=-1;
-static struct { bool valid,ms,set,shop,bat; int sel,scroll,species_page; bool species,slots,habitat; ui349_view_t view; } s_hidden;
+static struct { bool valid,ms,set,shop,bat; int sel,scroll,species_page; bool species,slots,habitat;
+#ifdef POCKET_WORLD_PROTO
+ bool copy_picker,copy_placing;
+#endif
+ ui349_view_t view; } s_hidden;
 static bool s_press_world;
+#ifdef POCKET_WORLD_PROTO
+static int s_press_screen_y;
+#endif
 static bool s_trimmed; /* Latch across simulation ticks until release. */
 #endif
 static bool s_inverted;                           /* screen 180-flipped: mirror into tank space */
@@ -132,9 +142,26 @@ void touch_port_poll(tank_t *t) {
     int mapped_x, mapped_y;
     int ux = raw_x, uy = raw_y;
     if (s_inverted) { ux = UI349_W - 1 - ux; uy = UI349_H - 1 - uy; }
+    #ifdef POCKET_WORLD_PROTO
+    imu_port_poll(now);
+    #endif
     int action = ui349_input(&g_ui349, touched, ux, uy, &touched, &mapped_x, &mapped_y);
     if (action != UI349_PASS) {
         if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
+#ifdef POCKET_WORLD_PROTO
+        if(action>=UI349_COPIES&&action<=UI349_COPY_DONE){
+            ui349_state_t *u=&g_ui349;
+            if(action==UI349_COPIES){touch_port_dismiss();notice_dismiss();u->copy_picker=true;u->copy_item=6;u->copy_selected=-1;u->copy_error=false;}
+            else if(action==UI349_COPY_BACK){u->copy_picker=false;touch_port_show_shop(true);}
+            else if(action==UI349_COPY_PREV||action==UI349_COPY_NEXT){int step=action==UI349_COPY_NEXT?1:-1;do{u->copy_item+=step;if(u->copy_item<6)u->copy_item=WP_AIRSTONE;if(u->copy_item>WP_AIRSTONE)u->copy_item=6;}while(u->copy_item<SD_ITEM_COUNT&&!tank_item_allowed(t->habitat,u->copy_item));u->copy_selected=-1;u->copy_error=false;}
+            else if(action==UI349_COPY_BUY){int id=wp_buy(t,&t->world,u->copy_item,u->world_camera.x+WP_W*.5f,1);u->copy_error=id<0;if(id>=2){u->copy_selected=id;u->copy_depth=1;progression_save(t);}}
+            else if(action==UI349_COPY_MOVE){u->copy_picker=false;u->copy_placing=true;touch_port_dismiss();}
+            else if(action==UI349_COPY_DEPTH){for(int i=0;i<WP_COPIES;i++)if(t->world.saved.copy[i].id==u->copy_selected){wp_copy_t *p=&t->world.saved.copy[i];u->copy_depth=(p->depth+1)%3;wp_move(&t->world,p->id,p->x,u->copy_depth);progression_save(t);}}
+            else if(action==UI349_COPY_SELL){if(wp_sell(t,&t->world,u->copy_selected)){u->copy_selected=-1;progression_save(t);}}
+            else if(action==UI349_COPY_DONE){u->copy_placing=false;u->copy_picker=true;progression_save(t);}
+            return;
+        }
+#endif
         if (action == UI349_MENU || action == UI349_SETTINGS || action == UI349_SHOP) {
             touch_port_dismiss(); notice_dismiss();
             if (action == UI349_MENU) touch_port_show_milestones(true);
@@ -172,6 +199,10 @@ void touch_port_poll(tank_t *t) {
         }
         return;
     }
+#ifdef POCKET_WORLD_PROTO
+    if(g_ui349.copy_placing){if(touched)wp_move(&t->world,g_ui349.copy_selected,(float)mapped_x,g_ui349.copy_depth);s_down=false;return;}
+    if(g_ui349.copy_picker){s_down=false;return;}
+#endif
     if (g_ui349.positioning) mapped_y = TANK_H - 4; /* placement's drag zone, never its menu hit boxes */
     float tx = touched ? mapped_x : s_lx;
     float ty = touched ? mapped_y - s_bias_y : s_ly;
@@ -191,11 +222,18 @@ void touch_port_poll(tank_t *t) {
         s_press_us = now; s_px = tx; s_py = ty;
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
         s_press_world = ui349_world_view(&g_ui349);
+#ifdef POCKET_WORLD_PROTO
+        s_press_screen_y=uy;
+#endif
         s_trimmed = false;
 #endif
         /* snapshot the school: the user aims at where a fish WAS - by release
            a darting fish has moved and the finger hid it the whole time */
-        for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y; }
+        for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y;
+#ifdef POCKET_WORLD_PROTO
+            if(s_press_world&&t->fish[i].glass_attached){float mx,my,gx,gy;wp_origin(&g_ui349.world_camera,1,&mx,&my);wp_origin(&g_ui349.world_camera,2,&gx,&gy);s_fx[i]+=mx-gx;s_fy[i]+=my-gy;}
+#endif
+        }
     }
     bool su = setup_active();                                /* before the touch: BEGIN's release is not a tank tap */
     if (s_set && !s_cf && !su) {                             /* the settings page owns the glass: segments, the seconds wheel, CLOSE */
@@ -220,15 +258,29 @@ void touch_port_poll(tank_t *t) {
     clean=ui349_clean_view(&g_ui349) && !su && !s_cf;
 #endif
     bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat;      /* a page or a prompt owns the glass */
-    if (touched) { s_lx = tx; s_ly = ty; if (!modal) tank_touch_drag(t, tx, ty); }  /* stroke = wipe/slash */
+    if (touched) { s_lx = tx; s_ly = ty; if (!modal) {
+#ifdef POCKET_WORLD_PROTO
+        if(s_press_world&&!g_ui349.positioning){float mx,my,gx,gy;wp_origin(&g_ui349.world_camera,1,&mx,&my);wp_origin(&g_ui349.world_camera,2,&gx,&gy);tank_touch_drag_layers(t,tx,ty,gx-mx,gy-my);}
+        else
+#endif
+        tank_touch_drag(t, tx, ty);
+    } }  /* stroke = wipe/slash */
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
     if (touched && !modal && t->slash_engaged) s_trimmed = true;
 #endif
     /* tap-and-hold on a decoration (2026-09-24, Strato: "right now it's like 5
        taps to get back to the edit"): a still finger 700 ms on an owned
        piece opens its placement page (MOVE / DEPTH / SELL) right there */
-    if (!clean && touched && !modal && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24 && fabsf(ty - s_py) < 24) {
+    if (touched && !modal && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24 && fabsf(ty - s_py) < 24) {
+#ifdef POCKET_WORLD_PROTO
+        if(s_press_world&&!g_ui349.positioning){float sx,sy;wp_project(&g_ui349.world_camera,1,s_px,s_py,&sx,&sy);int id=wp_hit(&g_ui349.world_camera,&t->world,sx,sy,g_ui349.copy_selected);
+            if(id>=2){g_ui349.copy_selected=id;for(int i=0;i<WP_COPIES;i++)if(t->world.saved.copy[i].id==id){g_ui349.copy_item=t->world.saved.copy[i].item;g_ui349.copy_depth=t->world.saved.copy[i].depth;}
+                g_ui349.copy_picker=true;g_ui349.copy_error=false;notice_dismiss();s_sel=-1;s_held_page=true;return;}}
+#endif
         int it = tank_decor_hit(t, s_px, s_py);
+#ifdef POCKET_WORLD_PROTO
+        if(s_press_world&&!g_ui349.positioning){float sx,sy;wp_project(&g_ui349.world_camera,1,s_px,s_py,&sx,&sy);it=-1;for(int d=2;d>=0;d--){float wx,wy;wp_map(&g_ui349.world_camera,d,sx,sy,&wx,&wy);int hit=tank_decor_hit(t,wx,wy);if(hit>=0&&tank_decor_z(t,hit)==d){it=hit;break;}}}
+#endif
         if (it >= 0) { setup_begin_place(t, it); s_held_page = true; s_sel = -1;
                        ESP_LOGI(TAG, "held on the %s: placement page up", SD_ITEMS[it].name); }
     }
@@ -317,9 +369,21 @@ select_creature:;
             else if (s_sel >= 0) s_sel = -1;   /* card up: a tap on empty glass just
                                                   dismisses it - it is NOT a tank tap
                                                   (no feed, no light-toggle burst) */
-            else tank_touch_tap(t, s_px, s_py);
+            else {
+#ifdef POCKET_WORLD_PROTO
+                if(s_press_world&&s_press_screen_y<22)tank_feed(t,s_px,3);
+                else
+#endif
+                tank_touch_tap(t,s_px,s_py);
+            }
         }
-        else if (!modal && s_py < 60 && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed */
+        else if (!modal &&
+#ifdef POCKET_WORLD_PROTO
+            (s_press_world?s_press_screen_y<30:s_py<60)
+#else
+            s_py<60
+#endif
+            && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed */
     }
 released:
     if (!touched) s_held_page = false;
@@ -374,10 +438,18 @@ void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_tim
 void touch_port_toggle_pages(void){
     if(s_cf||setup_active()||s_down||g_ui349.owner)return; /* Never cut a captured touch/confirmation in half. */
     if(!g_ui349.controls_hidden){
-        s_hidden.valid=s_ms||s_set||s_shop||s_bat||s_sel>=0||g_ui349.slots_picker;g_ui349.controls_hidden=true;
+        s_hidden.valid=s_ms||s_set||s_shop||s_bat||s_sel>=0||g_ui349.slots_picker
+#ifdef POCKET_WORLD_PROTO
+ ||g_ui349.copy_picker||g_ui349.copy_placing
+#endif
+ ;g_ui349.controls_hidden=true;
         s_hidden.ms=s_ms;s_hidden.set=s_set;s_hidden.shop=s_shop;s_hidden.bat=s_bat;s_hidden.sel=s_sel;
         s_hidden.scroll=g_ui349.scroll;s_hidden.view=g_ui349.view;s_hidden.species=g_ui349.species_picker;
         s_hidden.slots=g_ui349.slots_picker;s_hidden.habitat=g_ui349.habitat_picker;s_hidden.species_page=g_ui349.species_page;
+#ifdef POCKET_WORLD_PROTO
+        s_hidden.copy_picker=g_ui349.copy_picker;s_hidden.copy_placing=g_ui349.copy_placing;
+        g_ui349.copy_picker=g_ui349.copy_placing=false;
+#endif
         s_ms=s_set=s_shop=s_bat=false;s_sel=-1;
         g_ui349.species_picker=g_ui349.slots_picker=g_ui349.habitat_picker=false;
         g_ui349.view=(ui349_view_t){0,"TANK",true,0};g_ui349.scroll=0;
@@ -386,10 +458,18 @@ void touch_port_toggle_pages(void){
         s_ms=s_hidden.ms;s_set=s_hidden.set;s_shop=s_hidden.shop;s_bat=s_hidden.bat;s_sel=s_hidden.sel;
         s_sel_us=s_bat_us=esp_timer_get_time();g_ui349.view=s_hidden.view;g_ui349.scroll=s_hidden.scroll;
         g_ui349.species_picker=s_hidden.species;g_ui349.slots_picker=s_hidden.slots;
-        g_ui349.habitat_picker=s_hidden.habitat;g_ui349.species_page=s_hidden.species_page;s_hidden.valid=false;
+        g_ui349.habitat_picker=s_hidden.habitat;g_ui349.species_page=s_hidden.species_page;
+#ifdef POCKET_WORLD_PROTO
+        g_ui349.copy_picker=s_hidden.copy_picker;g_ui349.copy_placing=s_hidden.copy_placing;
+#endif
+        s_hidden.valid=false;
     }else {g_ui349.controls_hidden=false;s_ms=false;}
     g_ui349.owner=0;s_back=false;s_held_page=false;
 }
 int touch_port_take_slot(void){int s=s_slot_request;s_slot_request=-1;return s;}
-void touch_port_slot_changed(void){touch_port_dismiss();s_down=false;s_held_page=false;s_trimmed=false;s_cf=false;s_cf_ans=0;s_back=false;}
+void touch_port_slot_changed(void){
+#ifdef POCKET_WORLD_PROTO
+    g_ui349.copy_picker=g_ui349.copy_placing=false;g_ui349.copy_selected=-1;
+#endif
+touch_port_dismiss();s_down=false;s_held_page=false;s_trimmed=false;s_cf=false;s_cf_ans=0;s_back=false;}
 #endif

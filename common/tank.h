@@ -1,3 +1,4 @@
+#include "world_types.h"
 /* tank.h — platform-agnostic reflex layer for the pocket fish tank.
  *
  * Ported from the browser prototype (llm-fishtank-v0_2.html); same fish,
@@ -472,6 +473,9 @@ typedef struct tank {
     uint32_t advisor_asks;         /* diagnostic: requests issued */
     uint32_t rng;                  /* xorshift state, deterministic */
     _Alignas(8) tank_uv_t uv; /* appended extension: keep the complete v4 tank prefix */
+#ifdef POCKET_WORLD_PROTO
+    _Alignas(8) wp_objects_t world; /* appended v6; advisor snapshots include source state */
+#endif
 } tank_t;
 
 /* Advisor interface (Track 1 model, rule stub, or firmware LLM core).
@@ -579,6 +583,7 @@ void  tank_touch_tap(tank_t *t, float x, float y);
  * outer frond of a bed by the glass falls to a sweep that stops just short
  * of its spine (2026-09-14). Deliberately more travel than a tap, so aiming
  * at a fish can never shear the garden. */
+void tank_touch_drag_layers(tank_t *t,float x,float y,float glass_dx,float glass_dy);
 void  tank_touch_drag(tank_t *t, float x, float y);
 bool tank_take_feed_full(void);
 void  tank_feed(tank_t *t, float x, int n);

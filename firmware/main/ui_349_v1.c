@@ -4,6 +4,8 @@
 #include "viewport_349_v1.h"
 #include "pixels_349_v1.h"
 #include "setup.h"
+#include "progression.h"
+#include "render.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -96,8 +98,18 @@ void ui349_configure(ui349_state_t *s, ui349_view_t view) {
     if (changed) { s->positioning = can_position(s); s->species_picker=false; s->habitat_picker=false; }
 }
 bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
-    if(s->species_picker || s->habitat_picker || s->slots_picker) return false;
+    if(s->species_picker || s->habitat_picker || s->slots_picker
+#ifdef POCKET_WORLD_PROTO
+       ||s->copy_picker
+#endif
+    ) return false;
     if (x < 0 || x >= UI349_W || y < 0 || y >= UI349_H) return false;
+#ifdef POCKET_WORLD_PROTO
+    if(ui349_world_view(s)&&!s->positioning){
+        if(!s->controls_hidden&&!s->copy_placing&&y>=6&&y<58)return false;
+        float wx,wy;wp_map(&s->world_camera,s->copy_placing?s->copy_depth:1,(float)x,(float)y,&wx,&wy);*tx=(int)wx;*ty=(int)wy;return true;
+    }
+#endif
     if(ui349_clean_view(s)){*tx=x*(TANK_W-1)/(UI349_W-1);*ty=y*(TANK_H-1)/(UI349_H-1);return true;}
     /* Visible selector strip owns its gaps too: near-misses never tap/feed fish. */
     if(ui349_world_view(s)&&!s->positioning&&y>=6&&y<58)return false;
@@ -111,6 +123,16 @@ bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
 }
 /* Hit targets match the rectangles drawn below; rails never feed tank gestures. */
 static int rail_hit(const ui349_state_t *s, int x, int y) {
+#ifdef POCKET_WORLD_PROTO
+    if(s->copy_picker){
+        if(x>=552&&x<632&&y>=12&&y<60)return UI349_COPY_BACK;
+        if(y>=60&&y<104){if(x>=104&&x<180)return UI349_COPY_PREV;if(x>=456&&x<532)return UI349_COPY_NEXT;if(x>=196&&x<440)return UI349_COPY_BUY;}
+        if(s->copy_selected>=2&&y>=116&&y<160){if(x>=104&&x<236)return UI349_COPY_MOVE;if(x>=248&&x<380)return UI349_COPY_DEPTH;if(x>=392&&x<524)return UI349_COPY_SELL;}
+        return UI349_CONSUMED;
+    }
+    if(s->copy_placing){if(x>=552&&x<632&&y>=8&&y<56)return UI349_COPY_DONE;return UI349_CONSUMED;}
+    if(s->view.key==300&&x>=552&&x<632&&y>=66&&y<110)return UI349_COPIES;
+#endif
     if(ui349_clean_view(s))return UI349_CONSUMED;
     if(s->slots_picker) {
         if(s->can_undo&&x>=552&&x<632&&y>=66&&y<110)return UI349_UNDO;
@@ -168,6 +190,9 @@ static int rail_hit(const ui349_state_t *s, int x, int y) {
 }
 int ui349_input(ui349_state_t *s, bool down, int x, int y, bool *content_down, int *tx, int *ty) {
     *content_down = false;
+#ifdef POCKET_WORLD_PROTO
+    s->world_camera.frozen=down;
+#endif
     if (down && !s->owner) {
         s->owner = rail_hit(s,x,y) != UI349_CONSUMED ? 2 : ui349_map(s, x, y, tx, ty) ? 1 : 2;
         s->pressed = rail_hit(s, x, y); s->press_key = s->view.key;
@@ -191,6 +216,9 @@ int ui349_input(ui349_state_t *s, bool down, int x, int y, bool *content_down, i
         /* Keep a captured drag in the content; crossing a rail cannot tap it. */
         int left = ui349_clean_view(s)?0:ui349_world_view(s) ? V1_VIEW_X : UI349_PAGE_X;
         int width = ui349_clean_view(s)?UI349_W:ui349_world_view(s) ? V1_VIEW_W : TANK_UI_W;
+#ifdef POCKET_WORLD_PROTO
+        if(ui349_world_view(s)&&!s->positioning){left=0;width=UI349_W;}
+#endif
         (void)ui349_map(s, clamp(x, left, left + width - 1), clamp(y, 0, UI349_H - 1), tx, ty);
         s->last_x = *tx; s->last_y = *ty; *content_down = true;
     } else { *tx = s->last_x; *ty = s->last_y; s->owner = 0; }
@@ -218,6 +246,19 @@ static void button(uint16_t *fb, int x, int y, int w, int h, const char *label, 
     text(fb,x+(w-tw)/2,y+(h-7*scale)/2,scale,enabled ? 0xf2ffff : 0x66838a,label);
 }
 void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *source, uint16_t *native) {
+#ifdef POCKET_WORLD_PROTO
+    if(s->copy_picker){
+        rect(native,0,0,UI349_W,UI349_H,0x0b2029);char label[70];int item=s->copy_item;
+        text(native,104,10,2,0xe4dfb8,item==WP_AIRSTONE?"AIR STONE":SD_ITEMS[item].name);
+        if(s->copy_error)snprintf(label,sizeof label,"NOT ENOUGH CREDIT OR SPACE");else snprintf(label,sizeof label,"%d CREDITS   %d PLACED",(int)t->sd_balance,wp_quantity(t,&t->world,item));text(native,104,35,1,0xa9e2dd,label);
+        button(native,552,12,80,48,"BACK",2,true);button(native,104,60,76,44,"PREV",2,true);button(native,456,60,76,44,"NEXT",2,true);
+        snprintf(label,sizeof label,"ADD / %d",item==WP_AIRSTONE?40:SD_ITEMS[item].price);button(native,196,60,244,44,label,2,true);
+        if(s->copy_selected>=2){button(native,104,116,132,44,"MOVE",2,true);button(native,248,116,132,44,s->copy_depth==0?"BACK":s->copy_depth==1?"MIDDLE":"FRONT",2,true);button(native,392,116,132,44,"SELL",2,true);}
+        else text(native,104,128,1,0xa9e2dd,s->copy_error?"NOT ENOUGH CREDIT OR SPACE":"HOLD A PLACED COPY TO EDIT IT");
+        return;
+    }
+#endif
+
     if(s->slots_picker) {
         rect(native,0,0,UI349_W,UI349_H,0x0b2029);
         text(native,6,16,1,0xa9e2dd,"TANKS");
@@ -280,7 +321,7 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
         if (s->view.can_close) button(native,552,12,80,48,"TANK",2,true);
         if (can_position(s)) button(native,552,12,80,48,"MOVE",2,true);
         if (s->view.can_close) {
-            button(native,552,66,80,44,fish_view(s)?"SPECIES":"SETTINGS",1,true);
+            button(native,552,66,80,44,fish_view(s)?"SPECIES":s->view.key==300?"COPIES":"SETTINGS",1,true);
             button(native,552,116,80,44,"SHOP",2,true);
         } else {
         text(native,552,86,2,0xa9e2dd,s->scroll == 0 ? "TOP" : s->scroll == UI349_SCROLL_MAX ? "END" : "MIDDLE");
@@ -293,6 +334,22 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
             text(native,252,20,1,0xa9e2dd,tank_species_role(species));
         }
     } else {
+#ifdef POCKET_WORLD_PROTO
+        if(!s->positioning){
+            render_world_proto(t,&t->world,&s->world_camera,native);
+            if(s->copy_placing){button(native,552,8,80,48,"DONE",2,true);text(native,8,12,1,0xe4dfb8,"DRAG TO PLACE");return;}
+            if(s->controls_hidden)return;
+            for(int i=0;i<3;i++){if((unsigned)i==s->active_slot)rect(native,6+i*176,6,172,52,0xd8bd76);button(native,8+i*176,8,168,48,i==0?"STANDARD":i==1?"FRESHWATER":"SALTWATER",2,true);}
+            button(native,552,8,80,48,"MENU",2,true);
+            char level[12];if(s->battery.mv)snprintf(level,sizeof level,"~%d%%",s->battery.pct);else snprintf(level,sizeof level,"--%%");
+            text(native,8,158,1,s->battery.low?0xffce73:0xf2ffff,level);
+            if(s->battery.warning_s)text(native,55,158,1,0xffce73,"LOW BATTERY");
+            text(native,440,158,1,0xa9e2dd,t->uv.style?(t->night?"UV / OFF":"UV / ON"):(t->night?"WHITE / OFF":"WHITE / ON"));
+            if(s->feed_notice_s)text(native,248,148,1,0xffce73,"FOOD LIMIT - WAIT FOR FISH");
+            if(s->slot_error)text(native,248,128,1,0xffce73,"SAVE UNAVAILABLE");
+            render_sd_toast_native(t,native,UI349_W);return;
+        }
+#endif
         if(ui349_clean_view(s)){
             for(int y=0;y<UI349_H;y++)for(int x=0;x<UI349_W;x++)
                 native[y*UI349_W+x]=source[(y*(TANK_H-1)/(UI349_H-1))*TANK_W+x*(TANK_W-1)/(UI349_W-1)];

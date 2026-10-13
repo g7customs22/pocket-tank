@@ -530,6 +530,11 @@ static void tank_task(void *arg) {
         sleep_button_poll(now);
         pwr_key_poll(now);
         imu_port_poll(now);
+#ifdef POCKET_WORLD_PROTO
+        if(!g_ui349.world_ready){wp_camera_init(&g_ui349.world_camera);g_ui349.world_ready=true;}
+        int16_t accel[3];int64_t sample_us;
+        if(imu_port_accel_sample(accel,&sample_us))wp_camera_step(&g_ui349.world_camera,accel,imu_port_inverted(),sample_us,now,dt);
+#endif
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
         bool inv = imu_port_inverted();
@@ -593,12 +598,20 @@ static void tank_task(void *arg) {
         tank.hold_light = setup_active() || touch_port_confirm_up();   /* no lights-out mid-name */
         tank.ui_cover = tank.hold_light || touch_port_milestones() || touch_port_settings() || touch_port_shop() || touch_port_battery();   /* a fry's spawning waits */
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
-        tank.ui_cover = tank.ui_cover || g_ui349.slots_picker || g_ui349.habitat_picker;
+        tank.ui_cover = tank.ui_cover || g_ui349.slots_picker || g_ui349.habitat_picker
+#ifdef POCKET_WORLD_PROTO
+          ||g_ui349.copy_picker||g_ui349.copy_placing
+#endif
+        ;
 #endif
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
         touch_port_poll(&tank);
 #endif
+#ifdef POCKET_WORLD_PROTO
+        wp_tick(&tank,&tank.world,dt,llm_ok?advisor_llm_esp:advisor_rules);
+#else
         tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
+#endif
         progression_tick(&tank, dt);
         battery_frame(now);
         notice_tick(&tank, dt, tank.ui_cover || setup_birth_due());   /* a fry's welcome first (2026-09-29) */
@@ -626,7 +639,11 @@ static void tank_task(void *arg) {
             touch_port_poll(&tank); /* after prefetch wait, before the render work */
 #endif
             int64_t t0 = esp_timer_get_time();
-            render_tank(&tank, fb[cur], TANK_W);
+            bool native_scene=false;
+#ifdef POCKET_WORLD_PROTO
+            native_scene=!setup_active()&&!touch_port_confirm_up()&&!touch_port_settings()&&!touch_port_shop()&&!touch_port_milestones()&&!touch_port_battery()&&touch_port_selected()<0&&(g_ui349.controls_hidden||!notice_current());
+#endif
+            if(!native_scene)render_tank(&tank, fb[cur], TANK_W);
             touch_port_poll(&tank);          /* the CST816 is polled, not interrupt-
                                                 driven: extra samples inside the frame
                                                 keep quick finger taps from slipping
@@ -655,6 +672,7 @@ static void tank_task(void *arg) {
                 view.key += 2000 + focus;
                 view.initial_scroll = focus;
             }
+            if(native_scene&&view.key){render_tank(&tank,fb[cur],TANK_W);native_scene=false;}
             display349_view(&tank, view, fb[cur]);
 #endif
             if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
@@ -666,7 +684,7 @@ static void tank_task(void *arg) {
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
                 render_shop(&tank, fb[cur], TANK_W);
                 sel = -1;
-            } else if(controls_visible) render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
+            } else if(controls_visible&&!native_scene) render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
             if (sel >= 0) render_stats_card(&tank, sel, fb[cur], TANK_W);   /* tapped fish: stats card (+ the pill) */
             {   /* the battery pill: with a card, while low, and a few seconds after the cable goes in;
                    the battery page (a tap on the pill) over the live tank in its place */

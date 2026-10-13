@@ -1,3 +1,4 @@
+#include "decor_motion.h"
 /* render.c — porthole look: deep gradient water, AMOLED-black floor, procedural
  * fish (body polygon + animated tail + earned markings), bubbles, reef fronds
  * that grow with the tank's milestones. Everything is drawn
@@ -1622,6 +1623,7 @@ static void extra_box(ctx_t *c,float x,float y,float scale,int dx,int dy,int w,i
 static void draw_extra_impl(ctx_t *c,int item,float x,float y,float clock,float scale,bool bubbles) {
 #define EB(dx,dy,w,h,rgb) extra_box(c,x,y,scale,dx,dy,w,h,rgb)
 #define EE(dx,dy,rx,ry,rgb) fill_ellipse(c,x+(dx)*scale,y+(dy)*scale,(rx)*scale,(ry)*scale,rgb,255)
+    decor_motion_t motion=decor_motion(clock,0);
     EE(0,0,27,3,0x283e35);
     if(item==23||item==24){
         int count=item==23?9:17;
@@ -1634,15 +1636,18 @@ static void draw_extra_impl(ctx_t *c,int item,float x,float y,float clock,float 
             }
             EE(dx+sinf(clock*.8f+k+h*.03f)*h*.12f,-h,2.5f,3,item==23?0xc4dda4:0xe7adc7);
         }
-    } else if(item==6) { /* tank, suit, mask, hoses and flippers */
+    } else if(item==6) { /* gentle treading: body bob, arms and fins */
+        y+=motion.bob*scale;
         EB(7,-49,9,27,0x8c9d91); EB(9,-47,3,23,0xd3d8bd);
         EE(0,-34,10,17,0x263e46); EB(-7,-37,15,5,0xe7a84c);
         EE(-2,-59,11,11,0x263e46); EB(-11,-64,19,9,0xe8d68e);
         EB(-9,-62,15,5,0x7acdd0); EB(-2,-54,7,4,0xc8b886);
         EB(4,-53,3,13,0x6b8888); EB(5,-42,9,3,0x6b8888);
-        EB(-17,-42,7,20,0x345763); EE(-14,-20,4,4,0xd4a578);
+        EB(-17,-42+motion.stroke,7,20,0x345763); EE(-14,-20+motion.stroke,4,4,0xd4a578);
+        EB(10,-40-motion.stroke,5,16,0x345763);
         EB(-9,-22,7,18,0x263e46); EB(3,-22,7,18,0x263e46);
-        EB(-19,-6,18,5,0xe7a84c); EB(3,-6,18,5,0xe7a84c);
+        EB(-19,-6+motion.stroke,18,5,0xe7a84c); EB(3,-6-motion.stroke,18,5,0xe7a84c);
+        if(bubbles)for(int k=0;k<3;k++){float rise=fmodf(clock*14+k*25,75.f);fill_ellipse(c,x+(-3+sinf(clock+k)*3)*scale,y-(65+rise)*scale,1.4f*scale,1.8f*scale,0xaee5de,90);}
     } else if(item==7) {
         EE(0,-27,23,20,0xc8c4a1); EE(-5,-31,17,15,0xe2dcb8);
         EB(-16,-18,32,15,0xc8c4a1);
@@ -1651,18 +1656,16 @@ static void draw_extra_impl(ctx_t *c,int item,float x,float y,float clock,float 
         for(int k=-12;k<=12;k+=6) EB(k,-11,3,8,0xede4c0);
         EB(-4,-44,2,7,0x7e8870); EB(-1,-38,4,2,0x7e8870);
     } else if(item==8) {
-        int lift=(int)(12*(0.5f+0.5f*sinf(clock*1.2f)));
+        int lift=(int)(21*motion.lid);
         EB(-25,-27,50,25,0x70462a); EB(-22,-23,44,17,0x9b6333);
         EB(-25,-29,50,5,0x253c37);
         EB(-26,-36-lift,52,8,0x9b6333); EB(-26,-36-lift,52,2,0xd8af58);
         EB(-20,-26,4,24,0xcda65c); EB(16,-26,4,24,0xcda65c);
         EB(-4,-25,8,10,0xe3c871); EB(-1,-22,2,4,0x4d4932);
-        if(bubbles) for(int k=0;k<5;k++) {
-            float rise=fmodf(clock*22+k*25,125.0f);
-            float bx=x+sinf(clock*2+k)*7*scale;
-            float by=y-(40+rise)*scale;
-            fill_ellipse(c,bx,by,2.6f*scale,2.6f*scale,0xaee5de,100);
-            px_blend(c,(int)(bx-scale),(int)(by-scale),0xe0ffff,180);
+        if(bubbles){
+            for(int k=0;k<motion.fill;k++)EE(-14+k*7,-30,2,2,0xaee5de);
+            for(int k=0;k<2;k++){float rise=fmodf(clock*11+k*23,46.f);fill_ellipse(c,x+(-8+k*16)*scale,y-(36+rise)*scale,1.5f*scale,1.8f*scale,0xaee5de,95);}
+            if(motion.big_rise>=0){float by=y-(55+motion.big_rise)*scale;fill_ellipse(c,x,by,8*scale,9*scale,0xaee5de,80);fill_ellipse(c,x-3*scale,by-4*scale,2*scale,2*scale,0xe8ffff,190);}
         }
     } else if(item==11||item==12||item==17){
         int count=item==12?5:7;
@@ -3368,7 +3371,7 @@ void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page 
 #define TOAST_S 2.5f
 static int   g_toast_n;
 static float g_toast_until = -1;
-void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
+static void render_sd_toast_at(const tank_t *t, uint16_t *fb, int stride,bool native) {
     int n = progression_sd_take_award();
     if (n > 0) {
         if (t->clock < g_toast_until) { int64_t sum=(int64_t)g_toast_n+n;g_toast_n=(int)(sum>INT32_MAX?INT32_MAX:sum); } else g_toast_n = n;
@@ -3376,6 +3379,7 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
     }
     if (t->clock >= g_toast_until || t->clock < g_toast_until - TOAST_S - 1) return;   /* (a reset sends the clock back) */
     ctx_t c = ctx_full(fb, stride, 1.0f);
+    if(native){c.w=640;c.h=172;c.oy=-54;}
     char txt[16]; snprintf(txt, sizeof txt, "+%d", g_toast_n);
     const int W = 30 + text_w(txt, 2), H = 22, X = (TANK_UI_W - W) / 2, Y = 8;
     for (int y = Y; y < Y + H; y++)
@@ -3384,6 +3388,9 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
     blit_icon(&c, X + 5, Y + 3, &icon_shop_sand_dollar_16, 255);
     draw_text(&c, X + 25, Y + 4, 2, 0xffffff, txt);
 }
+
+void render_sd_toast(const tank_t *t,uint16_t *fb,int stride){render_sd_toast_at(t,fb,stride,false);}
+void render_sd_toast_native(const tank_t *t,uint16_t *fb,int stride){render_sd_toast_at(t,fb,stride,true);}
 
 /* ---- settings page (2026-09-15) ----
  * The milestones page's foot used to carry the brightness row; Strato:

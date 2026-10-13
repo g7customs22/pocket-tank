@@ -1072,7 +1072,7 @@ void tank_touch_hold(tank_t *t, float x, float y) {
     t->hold_active = true; t->hold_x = x; t->hold_y = y;
 }
 
-void tank_touch_drag(tank_t *t, float x, float y) {
+void tank_touch_drag_layers(tank_t *t, float x, float y,float glass_dx,float glass_dy) {
     tank_handled(t);
     t->drag_active = true;
     if (!t->drag_has_prev) {
@@ -1092,7 +1092,7 @@ void tank_touch_drag(tank_t *t, float x, float y) {
         float sdx = x - t->drag_px, sdy = y - t->drag_py;
         t->drag_dist += tank_dist(x, y, t->drag_px, t->drag_py);
         if (t->drag_dist >= WIPE_ENGAGE_PX) {      /* a real stroke, not a tap */
-            wipe_algae(t, t->drag_px, t->drag_py, x, y);
+            wipe_algae(t, t->drag_px+glass_dx, t->drag_py+glass_dy, x+glass_dx, y+glass_dy);
             if (!t->wipe_sounded) { t->wipe_sounded = true; tank_emit(TEV_WIPE, -1); }
         }
         /* the slash (2026-09-04, per frond): an armed stroke becomes scissors
@@ -1133,6 +1133,7 @@ void tank_touch_drag(tank_t *t, float x, float y) {
     t->drag_px = x; t->drag_py = y; t->drag_has_prev = true;
 }
 
+void tank_touch_drag(tank_t *t,float x,float y){tank_touch_drag_layers(t,x,y,0,0);}
 static bool feed_full;
 bool tank_take_feed_full(void){bool result=feed_full;feed_full=false;return result;}
 void tank_feed(tank_t *t, float x, int n) {

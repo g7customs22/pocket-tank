@@ -1,6 +1,6 @@
 set(SLOT_SRCS)
 if(CONFIG_POCKET_TANK_WAVESHARE_349_V1)
-    list(APPEND SLOT_SRCS slot_system.c slot_journal.c)
+    list(APPEND SLOT_SRCS slot_system.c slot_journal.c ../../../common/world_proto.c)
 endif()
 # Platform-agnostic reflex layer + renderer + progression, shared verbatim with
 # sim/ via ../../../common, plus this platform's implementation of the
@@ -20,5 +20,5 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -ffast-math -DPOP_CAP=5)
 target_compile_definitions(${COMPONENT_LIB} PUBLIC POP_CAP=5)
 
 if(CONFIG_POCKET_TANK_WAVESHARE_349_V1)
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC POCKET_TANK_WIDE_V1=1)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC POCKET_TANK_WIDE_V1=1 POCKET_WORLD_PROTO=1)
 endif()

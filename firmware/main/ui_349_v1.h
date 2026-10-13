@@ -2,6 +2,9 @@
 #ifndef UI_349_V1_H
 #define UI_349_V1_H
 #include "tank.h"
+#ifdef POCKET_WORLD_PROTO
+#include "world_proto.h"
+#endif
 #define UI349_W 640
 #define UI349_H 172
 #define UI349_PAGE_X 96
@@ -39,6 +42,11 @@ static inline void ui349_battery_update(ui349_battery_t *b,int mv) {
 
 }
 typedef struct {
+#ifdef POCKET_WORLD_PROTO
+    wp_camera_t world_camera;
+    bool world_ready,copy_picker,copy_placing,copy_error;
+    int copy_item,copy_selected,copy_depth;
+#endif
     ui349_battery_t battery;
     ui349_view_t view;
     int camera_x, camera_y;
@@ -73,6 +81,7 @@ static inline void ui349_contact(ui349_contact_t *s, int64_t now, bool *down, ui
     }
 }
 
+enum { UI349_COPIES=400,UI349_COPY_BACK,UI349_COPY_PREV,UI349_COPY_NEXT,UI349_COPY_BUY,UI349_COPY_MOVE,UI349_COPY_DEPTH,UI349_COPY_SELL,UI349_COPY_DONE };
 enum { UI349_PASS, UI349_CONSUMED, UI349_MENU, UI349_SETTINGS, UI349_SHOP, UI349_CLOSE, UI349_NEXT, UI349_SPECIES, UI349_SPECIES_BACK, UI349_HABITAT=20, UI349_HABITAT_BACK, UI349_TANKS, UI349_TANKS_BACK, UI349_TANK_STYLE, UI349_SPECIES_PREV, UI349_SPECIES_NEXT, UI349_UNDO, UI349_SLOT_PICK=300, UI349_SPECIES_PICK=100, UI349_HABITAT_PICK=200 };
 /* Active tank taps are consumed by the rail, but never dispatch a switch. */
 static inline int ui349_slot_request(const ui349_state_t *s,int action){
@@ -81,7 +90,11 @@ static inline int ui349_slot_request(const ui349_state_t *s,int action){
 }
 /* Classify movement in screen pixels, independent of aquarium scale. */
 static inline bool ui349_tap(bool world, bool modal, int64_t elapsed_us, float dx, float dy) {
+    #ifndef POCKET_WORLD_PROTO
     if (world) { dx *= (float)(TANK_W * UI349_H / TANK_H - 1) / (TANK_W - 1); dy *= (float)(UI349_H - 1) / (TANK_H - 1); }
+#else
+    (void)world;
+#endif
     return elapsed_us < (modal ? 800000 : 350000) && dx*dx + dy*dy < 24*24;
 }
 static inline bool ui349_clean_view(const ui349_state_t *s){return s->controls_hidden && s->view.key==0 && !s->positioning;}

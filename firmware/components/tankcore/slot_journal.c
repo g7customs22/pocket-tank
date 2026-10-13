@@ -14,12 +14,13 @@ static int read_bank(sj_t *j,unsigned key,unsigned bank,size_t len,header_t *h,v
     uint32_t off=offset(key,bank);
     if(!j->io.read(j->io.ctx,off,h,sizeof *h))return -1;
     bool legacy=j->legacy_schema && h->schema==j->legacy_schema;
-    size_t stored_len=legacy&&key!=3?j->legacy_length:len;
-    if(h->magic!=MAGIC||(!legacy&&h->schema!=j->schema)||h->key!=key||h->length!=stored_len||h->sequence==0||h->sequence==UINT32_MAX||h->header_crc!=crc(h,24))return 0;
+    bool legacy2=j->legacy2_schema && h->schema==j->legacy2_schema;
+    size_t stored_len=key==3?len:legacy?j->legacy_length:legacy2?j->legacy2_length:len;
+    if(h->magic!=MAGIC||(!legacy&&!legacy2&&h->schema!=j->schema)||h->key!=key||h->length!=stored_len||h->sequence==0||h->sequence==UINT32_MAX||h->header_crc!=crc(h,24))return 0;
     if(stored_len>len||stored_len>j->capacity)return 0;
     if(!j->io.read(j->io.ctx,off+sizeof *h,out,stored_len))return -1;
     if(crc(out,stored_len)!=h->data_crc)return 0;
-    if(legacy&&key!=3 && (!j->upgrade||!j->upgrade(out,stored_len,len)))return 0;
+    if((legacy||legacy2)&&key!=3 && (!j->upgrade||!j->upgrade(out,stored_len,len)))return 0;
     return 1;
 }
 static int newest(sj_t *j,unsigned key,size_t len,header_t *best){
@@ -49,8 +50,8 @@ static bool save(sj_t *j,unsigned key,const void *data,size_t len){
     header_t check;
     return read_bank(j,key,dest,len,&check,j->scratch)==1 && check.sequence==h.sequence && !memcmp(data,j->scratch,len);
 }
-bool sj_mount_compat(sj_t *j,sj_io_t io,uint32_t schema,uint32_t legacy_schema,size_t legacy_length,bool (*upgrade)(void *,size_t,size_t),void *scratch,size_t capacity){
-    memset(j,0,sizeof *j);j->io=io;j->schema=schema;j->scratch=scratch;j->capacity=capacity;j->legacy_schema=legacy_schema;j->legacy_length=legacy_length;j->upgrade=upgrade;
+bool sj_mount_compat2(sj_t *j,sj_io_t io,uint32_t schema,uint32_t legacy_schema,size_t legacy_length,uint32_t legacy2_schema,size_t legacy2_length,bool (*upgrade)(void *,size_t,size_t),void *scratch,size_t capacity){
+    memset(j,0,sizeof *j);j->io=io;j->schema=schema;j->scratch=scratch;j->capacity=capacity;j->legacy_schema=legacy_schema;j->legacy_length=legacy_length;j->upgrade=upgrade;j->legacy2_schema=legacy2_schema;j->legacy2_length=legacy2_length;
     if(capacity<sizeof(sj_meta_t))return false;
     header_t h;int b=newest(j,3,sizeof j->meta,&h);
     if(b==-2)return false;
@@ -99,3 +100,5 @@ bool sj_undo_save(sj_t *j,unsigned slot,const void *data,size_t len){
 bool sj_undo_load(sj_t *j,unsigned slot,void *data,size_t len){return slot<SJ_SLOTS&&load(j,slot+4,data,len);}
 
 bool sj_mount(sj_t *j,sj_io_t io,uint32_t schema,void *scratch,size_t capacity){return sj_mount_compat(j,io,schema,0,0,NULL,scratch,capacity);}
+
+bool sj_mount_compat(sj_t *j,sj_io_t io,uint32_t schema,uint32_t legacy,size_t length,bool (*up)(void *,size_t,size_t),void *scratch,size_t capacity){return sj_mount_compat2(j,io,schema,legacy,length,0,0,up,scratch,capacity);}

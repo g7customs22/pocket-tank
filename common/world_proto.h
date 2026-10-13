@@ -4,12 +4,6 @@
 #include "tank.h"
 #define WP_W 640
 #define WP_H 172
-#define WP_COPIES 8
-#define WP_SOURCES 4
-#define WP_AIRSTONE 25
-typedef struct { uint16_t id; uint8_t item,depth; float x; } wp_copy_t;
-typedef struct { wp_copy_t copy[WP_COPIES]; } wp_saved_t;
-typedef struct { wp_saved_t saved; uint16_t target[N_FISH_MAX]; uint8_t assigned; } wp_objects_t;
 typedef struct { float x,y,neutral_roll,neutral_pitch; bool ready,frozen; int64_t last_sample; unsigned rejected; } wp_camera_t;
 typedef struct { uint16_t id; float x,y; } wp_source_t;
 void wp_camera_init(wp_camera_t *c);
@@ -18,6 +12,7 @@ void wp_recenter(wp_camera_t *c,const int16_t a[3],bool inverted);
 void wp_origin(const wp_camera_t *c,int depth,float *x,float *y);
 void wp_map(const wp_camera_t *c,int depth,float sx,float sy,float *x,float *y);
 void wp_project(const wp_camera_t *c,int depth,float x,float y,float *sx,float *sy);
+bool wp_valid(const wp_saved_t *saved);
 int wp_quantity(const tank_t *t,const wp_objects_t *o,int item);
 int wp_buy(tank_t *t,wp_objects_t *o,int item,float x,int depth);
 bool wp_move(wp_objects_t *o,int id,float x,int depth);
