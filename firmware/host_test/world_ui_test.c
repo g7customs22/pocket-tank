@@ -1,5 +1,6 @@
 #include "world_proto.h"
 #include "ui_349_v1.h"
+#include "render.h"
 #include "decor_motion.h"
 #include "progression.h"
 #include "advisor.h"
@@ -19,7 +20,31 @@ static void sample(float roll,float pitch,int16_t a[3]){float r=roll*.017453293f
 static void ready(tank_t *t){tank_init(t,23);progression_fresh(t);progression_setup_done(t);t->light_auto=false;t->light_manual_off=false;t->sd_balance=10000;for(int i=0;i<t->n_fish;i++){progression_set_age(t,i,40000);t->fish[i].hunger=2;t->fish[i].energy=8;t->fish[i].stress=0;}}
 static goal_t play(const tank_t *t,int i,bool req){(void)t;(void)i;(void)req;return (goal_t){GOAL_VISIT_BUBBLES,3,1,GOAL_COUNT};}
 static void ppm(int frame,uint16_t *fb){char name[120];snprintf(name,sizeof name,"../outputs/world-prototype/frame-%03d.ppm",frame);FILE *f=fopen(name,"wb");assert(f);fprintf(f,"P6\n640 172\n255\n");for(int i=0;i<WP_W*WP_H;i++){uint16_t c=fb[i];unsigned char p[3]={(c>>11)*255/31,((c>>5)&63)*255/63,(c&31)*255/31};fwrite(p,1,3,f);}fclose(f);}
+static void center_tests(void){
+ ui349_state_t s={0};wp_camera_init(&s.world_camera);int16_t a[3];sample(18,12,a);
+ s.world_camera.x=704;s.world_camera.y=0;
+ assert(ui349_center_view(&s,a,false,100000,350000));assert(s.center_result==1&&s.world_ready);
+ assert(s.world_camera.x==352&&s.world_camera.y==196);
+ assert(wp_camera_step(&s.world_camera,a,false,350000,350000,.1f));assert(s.world_camera.x==352&&s.world_camera.y==196);
+ wp_camera_t before=s.world_camera;
+ assert(!ui349_center_view(&s,a,false,100000,350001));assert(s.center_result==-1&&!memcmp(&before,&s.world_camera,sizeof before));
+ assert(!ui349_center_view(&s,a,false,400000,350000));assert(!ui349_center_view(&s,NULL,false,350000,350000));
+ assert(!ui349_center_view(&s,a,false,0,350000));a[0]=32767;assert(!ui349_center_view(&s,a,false,350000,350000));
+ memset(a,0,sizeof a);assert(!ui349_center_view(&s,a,false,350000,350000));sample(18,12,a);
+ s.world_camera.frozen=true;before=s.world_camera;assert(!ui349_center_view(&s,a,false,350000,350000));assert(!memcmp(&before,&s.world_camera,sizeof before));s.world_camera.frozen=false;
+ ui349_configure(&s,(ui349_view_t){200,"OPTIONS",true,0});bool down;int x,y;
+ assert(ui349_input(&s,true,590,80,&down,&x,&y)==UI349_CONSUMED&&!down&&s.world_camera.frozen);
+ assert(ui349_input(&s,false,590,80,&down,&x,&y)==UI349_CENTER_VIEW&&!down&&!s.world_camera.frozen);
+ assert(ui349_center_view(&s,a,false,350000,350000));before=s.world_camera;
+ for(int tank=0;tank<3;tank++){s.active_slot=tank;ui349_world_slot_changed(&s);assert(!memcmp(&before,&s.world_camera,sizeof before));assert(s.center_result==0);}
+ ui349_input(&s,true,590,80,&down,&x,&y);ui349_input(&s,true,560,80,&down,&x,&y);assert(ui349_input(&s,false,560,80,&down,&x,&y)==UI349_CONSUMED);
+ ui349_input(&s,true,590,80,&down,&x,&y);ui349_configure(&s,(ui349_view_t){0,"TANK",true,0});assert(ui349_input(&s,false,590,80,&down,&x,&y)!=UI349_CENTER_VIEW);
+ s.controls_hidden=true;ui349_input(&s,true,590,80,&down,&x,&y);assert(ui349_input(&s,false,590,80,&down,&x,&y)!=UI349_CENTER_VIEW);
+ for(int side=0;side<2;side++){sample(side?80:-80,side?70:-70,a);for(int i=0;i<200;i++)wp_camera_step(&s.world_camera,a,false,400000,400000,.1f);assert(s.world_camera.x>=0&&s.world_camera.x<=704&&s.world_camera.y>=0&&s.world_camera.y<=196);}
+ puts("PASS CENTER VIEW: valid/posture neutral, default origin, stale/future/missing/railed/zero-g rejection, 250ms boundary, frozen touch, release ownership/drag cancellation, hidden controls, tank changes and travel bounds");
+}
 int main(void){
+ center_tests();
  setvbuf(stdout,NULL,_IONBF,0);_Static_assert(sizeof(wp_saved_t)==64,"fixed extension payload");
  wp_camera_t cam;wp_camera_init(&cam);int16_t a[3]={429,-16189,637};wp_recenter(&cam,a,false);
  for(int i=0;i<90;i++){a[0]=429+i%20-10;assert(wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f));}assert(cam.x==352&&cam.y==196);
@@ -65,5 +90,7 @@ int main(void){
  for(int mode=0;mode<3;mode++)for(int frame=0;frame<4;frame++){t.night=mode==2;t.uv.style=mode==1;t.clock=frame*3;ui349_render(&ui,&t,NULL,buf+1);assert(buf[0]==0x1234&&buf[n+1]==0xabcd);ppm(110+mode*4+frame,buf+1);}
  int releases=0;float previous=-1;for(int step=0;step<4800;step++){decor_motion_t m=decor_motion(step*.01f,0);assert(m.lid>=0&&m.lid<=1&&m.fill>=0&&m.fill<=4&&fabsf(m.bob)<=2.21f&&fabsf(m.stroke)<=3.01f);if(m.big_rise>=0&&previous<0)releases++;previous=m.big_rise;}assert(releases==4);assert(decor_motion(0,2).phase!=decor_motion(0,3).phase);
  puts("PASS native pixel mapping, gesture freeze, visible selectors, duplicate BUY/DONE rails, UI guards, White/UV/Off visuals; four chest releases in four cycles, bounded particles/motion and independent phases");
+ uint16_t *settings=calloc(TANK_W*TANK_H,2);assert(settings);render_settings(&t,settings,TANK_W,100,2);ui.controls_hidden=false;ui349_configure(&ui,(ui349_view_t){200,"OPTIONS",true,0});
+ for(int result=-1;result<=1;result++){ui.center_result=result;ui349_render(&ui,&t,settings,buf+1);assert(buf[0]==0x1234&&buf[n+1]==0xabcd);ppm(131+result,buf+1);}free(settings);
  printf("Memory: native RGB565 %zu bytes; persistent extension %zu; camera %zu; objects %zu; existing world tank %zu bytes\n",n*2,sizeof(wp_saved_t),sizeof cam,sizeof t.world,sizeof t);free(buf);return 0;
 }

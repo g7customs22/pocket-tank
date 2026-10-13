@@ -165,6 +165,12 @@ static int rail_hit(const ui349_state_t *s, int x, int y) {
         if (x >= 8 && x < 118 && y >= 8 && y < 44) return 12;
         if (x >= 552 && x < 632 && y >= 8 && y < 44) return UI349_NEXT;
     } else if (s->view.key) {
+#ifdef POCKET_WORLD_PROTO
+        if(s->view.key==200&&x>=552&&x<632){
+            if(y>=66&&y<110)return UI349_CENTER_VIEW;
+            if(y>=116&&y<160)return UI349_CONSUMED;
+        }
+#endif
         if(s->view.key==400 && x>=8 && x<84 && y>=6 && y<34)return UI349_TANKS;
         if (x >= 8 && x < 84) {
             if (y >= 40 && y < 88 && s->scroll > 0) return 10;
@@ -323,6 +329,15 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
         if (s->view.can_close) {
             button(native,552,66,80,44,fish_view(s)?"SPECIES":s->view.key==300?"COPIES":"SETTINGS",1,true);
             button(native,552,116,80,44,"SHOP",2,true);
+#ifdef POCKET_WORLD_PROTO
+            if(s->view.key==200){
+                button(native,552,66,80,44,"",1,true);
+                text(native,574,73,1,0xa9e2dd,"CENTER");text(native,580,87,1,0xa9e2dd,"VIEW");
+                rect(native,552,116,80,44,0x0b2029);
+                text(native,556,123,1,0xa9e2dd,s->center_result==1?"CENTERED":"HOLD STILL");
+                text(native,556,139,1,0xa9e2dd,s->center_result<0?"TRY AGAIN":s->center_result==1?"TAP TANK":"THEN TAP");
+            }
+#endif
         } else {
         text(native,552,86,2,0xa9e2dd,s->scroll == 0 ? "TOP" : s->scroll == UI349_SCROLL_MAX ? "END" : "MIDDLE");
         text(native,552,120,2,0xa9e2dd,"USE UP");

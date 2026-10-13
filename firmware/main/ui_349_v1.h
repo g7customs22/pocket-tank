@@ -46,6 +46,7 @@ typedef struct {
     wp_camera_t world_camera;
     bool world_ready,copy_picker,copy_placing,copy_error;
     int copy_item,copy_selected,copy_depth;
+    int center_result; /* 0 instruction, 1 success, -1 invalid/stale sample */
 #endif
     ui349_battery_t battery;
     ui349_view_t view;
@@ -58,6 +59,16 @@ typedef struct {
     unsigned feed_notice_s; int slot_fish[3];
     unsigned active_slot, slots_present;
 } ui349_state_t;
+#ifdef POCKET_WORLD_PROTO
+static inline bool ui349_center_view(ui349_state_t *s,const int16_t a[3],bool inverted,int64_t stamp,int64_t now){
+    bool ok=wp_center_view(&s->world_camera,a,inverted,stamp,now);
+    s->center_result=ok?1:-1;if(ok)s->world_ready=true;return ok;
+}
+static inline void ui349_world_slot_changed(ui349_state_t *s){
+    s->copy_picker=s->copy_placing=false;s->copy_selected=-1;s->center_result=0;
+    /* Camera neutral belongs to the device posture, not a saved aquarium. */
+}
+#endif
 /* First-sample presses. Short contacts need a prompt release so two taps do
  * not become one hold. Established holds/drags retain the 50 ms dropout bridge. */
 typedef struct {
@@ -82,6 +93,7 @@ static inline void ui349_contact(ui349_contact_t *s, int64_t now, bool *down, ui
 }
 
 enum { UI349_COPIES=400,UI349_COPY_BACK,UI349_COPY_PREV,UI349_COPY_NEXT,UI349_COPY_BUY,UI349_COPY_MOVE,UI349_COPY_DEPTH,UI349_COPY_SELL,UI349_COPY_DONE };
+enum { UI349_CENTER_VIEW=420 };
 enum { UI349_PASS, UI349_CONSUMED, UI349_MENU, UI349_SETTINGS, UI349_SHOP, UI349_CLOSE, UI349_NEXT, UI349_SPECIES, UI349_SPECIES_BACK, UI349_HABITAT=20, UI349_HABITAT_BACK, UI349_TANKS, UI349_TANKS_BACK, UI349_TANK_STYLE, UI349_SPECIES_PREV, UI349_SPECIES_NEXT, UI349_UNDO, UI349_SLOT_PICK=300, UI349_SPECIES_PICK=100, UI349_HABITAT_PICK=200 };
 /* Active tank taps are consumed by the rail, but never dispatch a switch. */
 static inline int ui349_slot_request(const ui349_state_t *s,int action){

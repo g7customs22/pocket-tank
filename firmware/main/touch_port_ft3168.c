@@ -149,6 +149,12 @@ void touch_port_poll(tank_t *t) {
     if (action != UI349_PASS) {
         if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
 #ifdef POCKET_WORLD_PROTO
+        if(action==UI349_CENTER_VIEW){
+            int16_t a[3];int64_t stamp=0;
+            bool valid=imu_port_accel_sample(a,&stamp);
+            bool ok=ui349_center_view(&g_ui349,valid?a:NULL,imu_port_inverted(),stamp,esp_timer_get_time());
+            ESP_LOGI(TAG,"center view: %s",ok?"centered":"invalid/stale sample; hold still and retry");return;
+        }
         if(action>=UI349_COPIES&&action<=UI349_COPY_DONE){
             ui349_state_t *u=&g_ui349;
             if(action==UI349_COPIES){touch_port_dismiss();notice_dismiss();u->copy_picker=true;u->copy_item=6;u->copy_selected=-1;u->copy_error=false;}
@@ -472,7 +478,7 @@ void touch_port_toggle_pages(void){
 int touch_port_take_slot(void){int s=s_slot_request;s_slot_request=-1;return s;}
 void touch_port_slot_changed(void){
 #ifdef POCKET_WORLD_PROTO
-    g_ui349.copy_picker=g_ui349.copy_placing=false;g_ui349.copy_selected=-1;
+    ui349_world_slot_changed(&g_ui349);
 #endif
 touch_port_dismiss();s_down=false;s_held_page=false;s_trimmed=false;s_cf=false;s_cf_ans=0;s_back=false;}
 #endif

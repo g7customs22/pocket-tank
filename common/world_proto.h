@@ -9,6 +9,7 @@ typedef struct { uint16_t id; float x,y; } wp_source_t;
 void wp_camera_init(wp_camera_t *c);
 bool wp_camera_step(wp_camera_t *c,const int16_t a[3],bool inverted,int64_t sample_us,int64_t now_us,float dt);
 void wp_recenter(wp_camera_t *c,const int16_t a[3],bool inverted);
+bool wp_center_view(wp_camera_t *c,const int16_t a[3],bool inverted,int64_t sample_us,int64_t now_us);
 void wp_origin(const wp_camera_t *c,int depth,float *x,float *y);
 void wp_map(const wp_camera_t *c,int depth,float sx,float sy,float *x,float *y);
 void wp_project(const wp_camera_t *c,int depth,float x,float y,float *sx,float *sy);

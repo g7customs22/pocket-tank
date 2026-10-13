@@ -14,6 +14,12 @@ static bool angles(const int16_t a[3],bool inv,float *roll,float *pitch){
 }
 void wp_camera_init(wp_camera_t *c){memset(c,0,sizeof *c);c->x=(TANK_W-WP_W)*.5f;c->y=TANK_H-WP_H;}
 void wp_recenter(wp_camera_t *c,const int16_t a[3],bool inverted){float r,p;if(angles(a,inverted,&r,&p)){c->neutral_roll=r;c->neutral_pitch=p;c->ready=true;}}
+bool wp_center_view(wp_camera_t *c,const int16_t a[3],bool inverted,int64_t stamp,int64_t now){
+ float r,p;
+ if(c->frozen||!a||stamp<=0||stamp>now||now-stamp>250000||!angles(a,inverted,&r,&p))return false;
+ c->neutral_roll=r;c->neutral_pitch=p;c->ready=true;c->last_sample=stamp;
+ c->x=(TANK_W-WP_W)*.5f;c->y=TANK_H-WP_H;return true;
+}
 static float dead(float a){return fabsf(a)<=2?0:(a>0?a-2:a+2);}
 bool wp_camera_step(wp_camera_t *c,const int16_t a[3],bool inverted,int64_t stamp,int64_t now,float dt){
  float roll,pitch;
