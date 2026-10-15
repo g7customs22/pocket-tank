@@ -20,14 +20,14 @@ static void ppm(int frame,uint16_t *fb){char name[120];snprintf(name,sizeof name
 int main(void){
  setvbuf(stdout,NULL,_IONBF,0);_Static_assert(sizeof(wp_saved_t)==64,"fixed extension payload");
  wp_camera_t cam;wp_camera_init(&cam);int16_t a[3]={429,-16189,637};wp_recenter(&cam,a,false);
- for(int i=0;i<90;i++){a[0]=429+i%20-10;assert(wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f));}assert(cam.x==32&&cam.y==12);
+ for(int i=0;i<90;i++){a[0]=429+i%20-10;assert(wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f));}assert(cam.x==32&&cam.y==WP_Y_CENTER);
  wp_camera_init(&cam);sample(0,0,a);wp_recenter(&cam,a,false);
- for(int i=0;i<150;i++){sample(15,0,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1 && cam.y==12);
- for(int i=0;i<150;i++){sample(-15,15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x>63&&cam.y>23);
- for(int i=0;i<150;i++){sample(15,-15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1&&cam.y<1);
+ for(int i=0;i<150;i++){sample(15,0,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1 && cam.y==WP_Y_CENTER);
+ for(int i=0;i<150;i++){sample(-15,15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x>63&&cam.y>WP_Y_MAX-1);
+ for(int i=0;i<150;i++){sample(15,-15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1&&cam.y<WP_Y_MIN+1);
  cam.frozen=true;float old=cam.x;sample(15,0,a);wp_camera_step(&cam,a,false,100000,100000,.1f);assert(cam.x==old);cam.frozen=false;
  assert(!wp_camera_step(&cam,a,false,100000,400001,.1f));a[0]=32767;assert(!wp_camera_step(&cam,a,false,400000,400000,.1f));
- for(int d=0;d<3;d++)for(int pos=0;pos<3;pos++){cam.x=pos*32;cam.y=pos*12;for(int y=0;y<WP_H;y++)for(int x=0;x<WP_W;x++){float wx,wy,sx,sy;wp_map(&cam,d,(float)x,(float)y,&wx,&wy);wp_project(&cam,d,wx,wy,&sx,&sy);assert(sx==x&&sy==y);}}
+ for(int d=0;d<3;d++)for(int pos=0;pos<3;pos++){cam.x=pos*32;cam.y=WP_Y_MIN+pos*12;for(int y=0;y<WP_H;y++)for(int x=0;x<WP_W;x++){float wx,wy,sx,sy;wp_map(&cam,d,(float)x,(float)y,&wx,&wy);wp_project(&cam,d,wx,wy,&sx,&sy);assert(sx==x&&sy==y);}}
  puts("PASS recorded neutral/jitter, smoothing/end stops, stale/railed rejection, frozen gesture and all 990720 layer/camera pixel roundtrips");
  tank_t t;ready(&t);memset(&t.world,0,sizeof t.world);t.sd_unlocks|=1u<<7;int skull1=wp_buy(&t,&t.world,7,520,2),skull2=wp_buy(&t,&t.world,7,520,2);assert(skull1>=2&&skull2>=2&&wp_quantity(&t,&t.world,7)==3);
  wp_camera_init(&cam);float sx,sy;wp_project(&cam,2,520,TANK_H-30,&sx,&sy);int picked=wp_hit(&cam,&t.world,sx,sy,-1);assert(picked==skull2&&wp_hit(&cam,&t.world,sx,sy,picked)==skull1);assert(wp_move(&t.world,skull2,950,1));
@@ -38,7 +38,7 @@ int main(void){
  t.fish[0].x=1100;t.fish[0].y=260;char encoding[640];advisor_core_encode(&t,0,encoding,sizeof encoding);assert(strstr(encoding,"bubble near"));tank_t copied=t;advisor_core_encode(&copied,0,encoding,sizeof encoding);assert(strstr(encoding,"bubble near"));
  wp_camera_init(&cam);cam.x=64;float offx=t.fish[1].x;t.fish[1].x=20;t.fish[1].goal.id=GOAL_VISIT_BUBBLES;float age=progression_age_s(&t,1);for(int i=0;i<120;i++){wp_tick(&t,&t.world,.05f,play);progression_tick(&t,.05f);}assert(progression_age_s(&t,1)>age+5&&t.fish[1].x!=20);(void)offx;
  puts("PASS duplicate purchases/quantities/independent moves/overlap cycling/single sale, four-source cap, stable per-fish choice and removal retarget, matching advisor sighting, offscreen simulation");
- ready(&t);memset(t.algae,255,sizeof t.algae);memset(t.veg_h,0,sizeof t.veg_h);wp_camera_init(&cam);cam.x=48;cam.y=12;float wx,wy;wp_map(&cam,2,200,60,&wx,&wy);int cell=(int)(wy/ALGAE_CELL)*ALGAE_COLS+(int)(wx/ALGAE_CELL_X);wp_wipe(&t,&cam,170,60,235,60);assert(t.algae[cell]<255);assert(t.algae[0]==255);
+ ready(&t);memset(t.algae,255,sizeof t.algae);memset(t.veg_h,0,sizeof t.veg_h);wp_camera_init(&cam);cam.x=48;cam.y=WP_Y_CENTER;float wx,wy;wp_map(&cam,2,200,60,&wx,&wy);int cell=(int)(wy/ALGAE_CELL)*ALGAE_COLS+(int)(wx/ALGAE_CELL_X);wp_wipe(&t,&cam,170,60,235,60);assert(t.algae[cell]<255);assert(t.algae[0]==255);
  puts("PASS visible foreground glass cleaning updates matching world cell, distant cell unchanged");
  ready(&t);memset(&t.world,0,sizeof t.world);t.sd_unlocks=SD_ITEM_PLANT|SD_ITEM_CASTLE|SD_ITEM_FERN|SD_ITEM_WOOD|SD_ITEM_STONES;t.uv.style=1;t.night=false;t.plant_x=780;t.castle_x=580;t.castle_z=DECOR_Z_BACK;
  tank_set_species(&t,0,SPECIES_TIGER_BARB);tank_set_species(&t,1,SPECIES_NEON);t.fish[0].x=550;t.fish[0].y=240;t.fish[1].x=1120;t.fish[1].y=235;

@@ -12,33 +12,35 @@ static bool angles(const int16_t a[3],bool inv,float *roll,float *pitch){
  if(inv){x=-x;y=-y;}
  *roll=atan2f(x,-y)*57.29578f;*pitch=atan2f(z,sqrtf(x*x+y*y))*57.29578f;return true;
 }
-void wp_camera_init(wp_camera_t *c){memset(c,0,sizeof *c);c->x=(TANK_W-WP_VIEW_W)*.5f;c->y=(TANK_H-WP_VIEW_H)*.5f;}
+void wp_camera_init(wp_camera_t *c){memset(c,0,sizeof *c);c->x=(TANK_W-WP_VIEW_W)*.5f;c->y=WP_Y_CENTER;}
+bool wp_set_zoom(wp_camera_t *c,bool enabled){if(c->frozen)return false;c->overview=!enabled;return true;}
 void wp_recenter(wp_camera_t *c,const int16_t a[3],bool inverted){float r,p;if(angles(a,inverted,&r,&p)){c->neutral_roll=r;c->neutral_pitch=p;c->ready=true;}}
 bool wp_center_view(wp_camera_t *c,const int16_t a[3],bool inverted,int64_t stamp,int64_t now){
  float r,p;
  if(c->frozen||!a||stamp<=0||stamp>now||now-stamp>250000||!angles(a,inverted,&r,&p))return false;
  c->neutral_roll=r;c->neutral_pitch=p;c->ready=true;c->last_sample=stamp;
- c->x=(TANK_W-WP_VIEW_W)*.5f;c->y=(TANK_H-WP_VIEW_H)*.5f;return true;
+ c->x=(TANK_W-WP_VIEW_W)*.5f;c->y=WP_Y_CENTER;return true;
 }
 static float dead(float a){return fabsf(a)<=2?0:(a>0?a-2:a+2);}
 bool wp_camera_step(wp_camera_t *c,const int16_t a[3],bool inverted,int64_t stamp,int64_t now,float dt){
  float roll,pitch;
  if(stamp<=0||stamp>now||now-stamp>250000||!angles(a,inverted,&roll,&pitch)){c->rejected++;return false;}
  if(!c->ready)wp_recenter(c,a,inverted);
- c->last_sample=stamp;if(c->frozen)return true;
+ c->last_sample=stamp;if(c->frozen||c->overview)return true;
  float tx=clamp((TANK_W-WP_VIEW_W)*.5f-dead(roll-c->neutral_roll)*(TANK_W-WP_VIEW_W)/26.f,0,TANK_W-WP_VIEW_W);
- float ty=clamp((TANK_H-WP_VIEW_H)*.5f+dead(pitch-c->neutral_pitch)*(TANK_H-WP_VIEW_H)/26.f,0,TANK_H-WP_VIEW_H);
+ float ty=clamp(WP_Y_CENTER+dead(pitch-c->neutral_pitch)*(WP_Y_MAX-WP_Y_MIN)/26.f,WP_Y_MIN,WP_Y_MAX);
  float alpha=1-expf(-clamp(dt,0,.1f)/.22f);c->x+=(tx-c->x)*alpha;c->y+=(ty-c->y)*alpha;return true;
 }
 void wp_origin(const wp_camera_t *c,int depth,float *x,float *y){
+ if(c->overview){*x=*y=0;return;}
  static const float rate[]={.40f,1.f,1.25f};depth=depth<0?0:depth>2?2:depth;
  *x=WP_SCALE*roundf(((TANK_W-WP_VIEW_W)*.5f+(c->x-(TANK_W-WP_VIEW_W)*.5f)*rate[depth])/WP_SCALE);
- *y=WP_SCALE*roundf(((TANK_H-WP_VIEW_H)*.5f+(c->y-(TANK_H-WP_VIEW_H)*.5f)*rate[depth])/WP_SCALE);
+ *y=WP_SCALE*roundf((WP_Y_CENTER+(c->y-WP_Y_CENTER)*rate[depth])/WP_SCALE);
  /* Foreground overscan is clipped to existing world boundaries. */
- *x=clamp(*x,0,TANK_W-WP_VIEW_W);*y=clamp(*y,0,TANK_H-WP_VIEW_H);
+ *x=clamp(*x,0,TANK_W-WP_VIEW_W);*y=clamp(*y,WP_Y_MIN,WP_Y_MAX);
 }
-void wp_map(const wp_camera_t *c,int d,float sx,float sy,float *x,float *y){wp_origin(c,d,x,y);*x+=sx*WP_SCALE;*y+=sy*WP_SCALE;}
-void wp_project(const wp_camera_t *c,int d,float x,float y,float *sx,float *sy){float ox,oy;wp_origin(c,d,&ox,&oy);*sx=(x-ox)/WP_SCALE;*sy=(y-oy)/WP_SCALE;}
+void wp_map(const wp_camera_t *c,int d,float sx,float sy,float *x,float *y){wp_origin(c,d,x,y);if(c->overview){*x=sx*(TANK_W-1)/(WP_W-1);*y=sy*(TANK_H-1)/(WP_H-1);}else{*x+=sx*WP_SCALE;*y+=sy*WP_SCALE;}}
+void wp_project(const wp_camera_t *c,int d,float x,float y,float *sx,float *sy){float ox,oy;wp_origin(c,d,&ox,&oy);*sx=(x-ox)/wp_units_x(c);*sy=(y-oy)/wp_units_y(c);}
 static bool allowed(int item){return item>=EXTRA_DECOR_FIRST&&item<=WP_AIRSTONE;}
 bool wp_valid(const wp_saved_t *saved){
  for(int i=0;i<WP_COPIES;i++){const wp_copy_t *p=&saved->copy[i];if(p->id&&(p->id!=i+2||!allowed(p->item)||p->depth>2||!isfinite(p->x)||p->x<42||p->x>TANK_W-42))return false;}

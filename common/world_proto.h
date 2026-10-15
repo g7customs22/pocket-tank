@@ -7,7 +7,13 @@
 #define WP_SCALE 2
 #define WP_VIEW_W (WP_W * WP_SCALE)
 #define WP_VIEW_H (WP_H * WP_SCALE)
-typedef struct { float x,y,neutral_roll,neutral_pitch; bool ready,frozen; int64_t last_sample; unsigned rejected; } wp_camera_t;
+#define WP_Y_MIN (TANK_H-WP_VIEW_H)
+#define WP_Y_MAX (2*WP_Y_MIN)
+#define WP_Y_CENTER ((WP_Y_MIN+WP_Y_MAX)*.5f)
+typedef struct { float x,y,neutral_roll,neutral_pitch; bool ready,frozen,overview; int64_t last_sample; unsigned rejected; } wp_camera_t;
+static inline float wp_units_x(const wp_camera_t *c){return c->overview?(float)(TANK_W-1)/(WP_W-1):WP_SCALE;}
+static inline float wp_units_y(const wp_camera_t *c){return c->overview?(float)(TANK_H-1)/(WP_H-1):WP_SCALE;}
+bool wp_set_zoom(wp_camera_t *c,bool enabled);
 typedef struct { uint16_t id; float x,y; } wp_source_t;
 void wp_camera_init(wp_camera_t *c);
 bool wp_camera_step(wp_camera_t *c,const int16_t a[3],bool inverted,int64_t sample_us,int64_t now_us,float dt);

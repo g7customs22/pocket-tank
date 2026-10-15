@@ -149,6 +149,7 @@ void touch_port_poll(tank_t *t) {
     if (action != UI349_PASS) {
         if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
 #ifdef POCKET_WORLD_PROTO
+        if(action==UI349_ZOOM){ui349_toggle_zoom(&g_ui349);return;}
         if(action==UI349_CENTER_VIEW){
             int16_t a[3];int64_t stamp=0;
             bool valid=imu_port_accel_sample(a,&stamp);
@@ -160,7 +161,7 @@ void touch_port_poll(tank_t *t) {
             if(action==UI349_COPIES){touch_port_dismiss();notice_dismiss();u->copy_picker=true;u->copy_item=6;u->copy_selected=-1;u->copy_error=false;}
             else if(action==UI349_COPY_BACK){u->copy_picker=false;touch_port_show_shop(true);}
             else if(action==UI349_COPY_PREV||action==UI349_COPY_NEXT){int step=action==UI349_COPY_NEXT?1:-1;do{u->copy_item+=step;if(u->copy_item<6)u->copy_item=WP_AIRSTONE;if(u->copy_item>WP_AIRSTONE)u->copy_item=6;}while(u->copy_item<SD_ITEM_COUNT&&!tank_item_allowed(t->habitat,u->copy_item));u->copy_selected=-1;u->copy_error=false;}
-            else if(action==UI349_COPY_BUY){int id=wp_buy(t,&t->world,u->copy_item,u->world_camera.x+WP_VIEW_W*.5f,1);u->copy_error=id<0;if(id>=2){u->copy_selected=id;u->copy_depth=1;progression_save(t);}}
+            else if(action==UI349_COPY_BUY){float wx,wy;wp_map(&u->world_camera,1,WP_W*.5f,WP_H*.5f,&wx,&wy);int id=wp_buy(t,&t->world,u->copy_item,wx,1);u->copy_error=id<0;if(id>=2){u->copy_selected=id;u->copy_depth=1;progression_save(t);}}
             else if(action==UI349_COPY_MOVE){u->copy_picker=false;u->copy_placing=true;touch_port_dismiss();}
             else if(action==UI349_COPY_DEPTH){for(int i=0;i<WP_COPIES;i++)if(t->world.saved.copy[i].id==u->copy_selected){wp_copy_t *p=&t->world.saved.copy[i];u->copy_depth=(p->depth+1)%3;wp_move(&t->world,p->id,p->x,u->copy_depth);progression_save(t);}}
             else if(action==UI349_COPY_SELL){if(wp_sell(t,&t->world,u->copy_selected)){u->copy_selected=-1;progression_save(t);}}
@@ -277,11 +278,11 @@ void touch_port_poll(tank_t *t) {
     /* tap-and-hold on a decoration (2026-09-24, Strato: "right now it's like 5
        taps to get back to the edit"): a still finger 700 ms on an owned
        piece opens its placement page (MOVE / DEPTH / SELL) right there */
-    float gesture_scale=1;
+    float gesture_scale_x=1,gesture_scale_y=1;
 #ifdef POCKET_WORLD_PROTO
-    if(s_press_world&&!g_ui349.positioning)gesture_scale=WP_SCALE;
+    if(s_press_world&&!g_ui349.positioning){gesture_scale_x=wp_units_x(&g_ui349.world_camera);gesture_scale_y=wp_units_y(&g_ui349.world_camera);}
 #endif
-    if (touched && !modal && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24*gesture_scale && fabsf(ty - s_py) < 24*gesture_scale) {
+    if (touched && !modal && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24*gesture_scale_x && fabsf(ty - s_py) < 24*gesture_scale_y) {
 #ifdef POCKET_WORLD_PROTO
         if(s_press_world&&!g_ui349.positioning){float sx,sy;wp_project(&g_ui349.world_camera,1,s_px,s_py,&sx,&sy);int id=wp_hit(&g_ui349.world_camera,&t->world,sx,sy,g_ui349.copy_selected);
             if(id>=2){g_ui349.copy_selected=id;for(int i=0;i<WP_COPIES;i++)if(t->world.saved.copy[i].id==id){g_ui349.copy_item=t->world.saved.copy[i].item;g_ui349.copy_depth=t->world.saved.copy[i].depth;}
@@ -294,12 +295,16 @@ void touch_port_poll(tank_t *t) {
         if (it >= 0) { setup_begin_place(t, it); s_held_page = true; s_sel = -1;
                        ESP_LOGI(TAG, "held on the %s: placement page up", SD_ITEMS[it].name); }
     }
-    if (touched && !modal && !s_held_page && now - s_press_us > 300000 && fabsf(ty - s_py) < 30*gesture_scale) tank_touch_hold(t, tx, ty);
+    if (touched && !modal && !s_held_page && now - s_press_us > 300000 && fabsf(ty - s_py) < 30*gesture_scale_y) tank_touch_hold(t, tx, ty);
     if (!touched && s_down) {
         /* release: classify with the LAST touched position (the old code fell
            back to the PRESS position here, so dx/dy were always 0 - every
            quick swipe read as a tap and the drag-feed could never fire) */
         float dx = s_lx - s_px, dy = s_ly - s_py;
+        float tap_dx=dx,tap_dy=dy;
+#ifdef POCKET_WORLD_PROTO
+        if(s_press_world&&!modal&&!g_ui349.positioning){tap_dx=dx*WP_SCALE/gesture_scale_x;tap_dy=dy*WP_SCALE/gesture_scale_y;}
+#endif
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
         if (s_trimmed) goto released; /* Scissors cannot also tap or drag-feed. */
 #endif
@@ -319,7 +324,7 @@ void touch_port_poll(tank_t *t) {
         }
         if (s_bat) { s_bat = false; ESP_LOGI(TAG, "battery page closed"); goto released; }   /* any release closes it */
         #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
-        if (ui349_tap(s_press_world, modal, now - s_press_us, dx, dy)) {
+        if (ui349_tap(s_press_world, modal, now - s_press_us, tap_dx, tap_dy)) {
 #else
         if (now - s_press_us < 350000 && dx * dx + dy * dy < 24 * 24) {
 #endif
@@ -362,13 +367,14 @@ select_creature:;
                (a fingertip on this 322 ppi panel covers ~60 px) against BOTH
                the press-time snapshot and the current position - whichever is
                closer - so a fish that moved mid-tap still registers. */
-            int best = -1; float bd = 38 * 38 * gesture_scale * gesture_scale;
+            int best = -1; float bd = 38 * 38;
             for (int i = 0; i < t->n_fish; i++) {
                 float ax = s_fx[i] - s_px, ay = s_fy[i] - s_py;
                 float bx = t->fish[i].x - s_px, by = t->fish[i].y - s_py;
 #ifdef POCKET_WORLD_PROTO
                 if(s_press_world&&t->fish[i].glass_attached){float mx,my,gx,gy;wp_origin(&g_ui349.world_camera,1,&mx,&my);wp_origin(&g_ui349.world_camera,2,&gx,&gy);bx+=mx-gx;by+=my-gy;}
 #endif
+                ax/=gesture_scale_x;bx/=gesture_scale_x;ay/=gesture_scale_y;by/=gesture_scale_y;
                 float d2a = ax * ax + ay * ay, d2b = bx * bx + by * by;
                 float d2 = d2a < d2b ? d2a : d2b;
                 if (d2 < bd) { bd = d2; best = i; }
@@ -400,7 +406,7 @@ select_creature:;
 #else
             s_py<60
 #endif
-            && dy >= 40*gesture_scale) tank_feed(t, s_lx, 3);  /* drag down from the top = feed */
+            && dy >= 40*gesture_scale_y) tank_feed(t, s_lx, 3);  /* drag down from the top = feed */
     }
 released:
     if (!touched) s_held_page = false;

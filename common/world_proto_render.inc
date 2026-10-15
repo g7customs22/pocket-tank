@@ -1,7 +1,19 @@
 /* Native viewport-only proof renderer, reusing the production vector assets.
  * No full-world framebuffer or new glow/postprocess allocation. */
 #include "world_proto.h"
-static ctx_t wp_ctx(uint16_t *fb,const wp_camera_t *camera,int depth,float dim,bool reference){float x,y;wp_origin(camera,depth,&x,&y);ctx_t c={fb,reference?WP_VIEW_W:WP_W,dim,(int)x,(int)y,WP_VIEW_W,WP_VIEW_H,false,0,reference?0:1};return c;}
+static ctx_t wp_ctx(uint16_t *fb,const wp_camera_t *camera,int depth,float dim,bool reference){float x,y;wp_origin(camera,depth,&x,&y);int w=camera->overview?TANK_W:WP_VIEW_W,h=camera->overview?TANK_H:WP_VIEW_H;ctx_t c={fb,reference?w:WP_W,dim,(int)x,(int)y,w,h,false,0,reference?0:camera->overview?2:1};return c;}
+/* Render-only substrate overscan. Physics, saved positions and tank bounds do
+ * not change. The continuous base reaches every visible bottom/side pixel. */
+static void wp_floor(ctx_t*c,bool uv){
+ int top=TANK_H-24,bottom=TANK_H+WP_Y_MIN;
+ /* rect_fill is a full-brightness UI helper; substrate follows scene dim. */
+ src_t base=src_color(uv?0x263846:0x343c31,c->dim);
+ for(int y=top;y<bottom;y++)span(c,0,TANK_W-1,y,&base,255);
+ for(int y=top+2;y<bottom;y+=5)for(int x=-4;x<TANK_W+6;x+=9){
+  unsigned h=chash(x/9,y/5);float px=x+(y%2?4:0),py=y+(h%3);
+  fill_ellipse(c,px,py,3+(h%2),1.8f,uv?(h&1?0x48616a:0x354955):(h&1?0x6a7060:0x4b5243),255);
+ }
+}
 static void wp_draw_item(ctx_t *c,const tank_t *t,int item,float x,float scale,unsigned id){
  if(x+100<c->ox||x-100>c->ox+c->w)return;
  if(item==WP_AIRSTONE){fill_ellipse(c,x,TANK_H-19,12,5,0x72a3ad,255);return;}
@@ -25,16 +37,16 @@ static void render_world_view(const tank_t *t,const wp_objects_t *o,const wp_cam
  bool uv=t->uv.style==1&&!t->night;
  if(g_habitat!=t->habitat||g_uv_scene!=uv)g_veg_row_dim=g_castle_dim=g_coral_dim=g_cl_dim=-1;
  g_uv_scene=uv;g_uv_material=false;g_habitat=t->habitat;
- int width=reference?WP_VIEW_W:WP_W,height=reference?WP_VIEW_H:WP_H,step=reference?1:WP_SCALE;
+ int width=reference?(camera->overview?TANK_W:WP_VIEW_W):WP_W,height=reference?(camera->overview?TANK_H:WP_VIEW_H):WP_H;
  float dim=t->night?.45f:1.f;ctx_t far=wp_ctx(fb,camera,0,dim*.65f,reference),mid=wp_ctx(fb,camera,1,dim,reference),front=wp_ctx(fb,camera,2,dim,reference);
- for(int y=0;y<height;y++){uint16_t col=rgb565(water_rgb(y*step+mid.oy),dim);for(int x=0;x<width;x++)fb[y*width+x]=col;}
+ for(int y=0;y<height;y++){int wy=reference?y+mid.oy:camera->overview?y*(TANK_H-1)/(WP_H-1):y*WP_SCALE+mid.oy;uint16_t col=rgb565(water_rgb(wy),dim);for(int x=0;x<width;x++)fb[y*width+x]=col;}
  /* Distant ridge and tall reed silhouettes make the far plane legible. */
  for(int k=0;k<12;k++){float x=60+k*120;fill_ellipse(&far,x,TANK_H-32,93,35,k%2?0x1b4146:0x25474c,255);
   for(int j=0;j<4;j++)fill_ellipse(&far,x-30+j*20,TANK_H-95-(k%3)*26,5,80+(j%2)*30,uv?0x25495c:0x285d55,255);}
  for(int d=0;d<3;d++){
   ctx_t *c=d==0?&far:d==1?&mid:&front;
   if(d==1){
-   for(int x=0;x<TANK_W;x+=9)fill_ellipse(c,x,TANK_H-10,7,4,0x435243,255);
+   wp_floor(c,uv);
    for(int bed=0;bed<tank_veg_beds(t);bed++)draw_veg(c,t,bed,bed*13+1,-1,false);
   }
   for(int item=2;item<SD_ITEM_COUNT;item++)if(item!=5&&(t->sd_unlocks&(1u<<item))&&tank_decor_z(t,item)==d)wp_draw_item(c,t,item,tank_decor_x(t,item),1,(unsigned)item+100);
@@ -46,7 +58,7 @@ static void render_world_view(const tank_t *t,const wp_objects_t *o,const wp_cam
    for(int i=0;i<MAX_FOOD;i++)if(t->food[i].alive){fill_ellipse(c,t->food[i].x,t->food[i].y,2.6f,2.6f,0xffbd59,255);}
    draw_snail(c,t,true);
    if(t->sd_unlocks&SD_ITEM_SHRIMP){src_t pal[SHRIMP_TONES];for(int k=0;k<SHRIMP_TONES;k++)pal[k]=src_color(SHRIMP_RGB[k],c->dim);for(int i=0;i<t->shrimp_n;i++)draw_shrimp(c,&t->shrimp[i],pal);}
-   for(int i=0;i<t->n_fish;i++){const fish_t *f=&t->fish[i];if(!f->glass_attached&&f->x+65>=c->ox&&f->x-65<c->ox+WP_VIEW_W&&f->y+40>=c->oy&&f->y-40<c->oy+WP_VIEW_H)draw_fish(c,t,f);}
+   for(int i=0;i<t->n_fish;i++){const fish_t *f=&t->fish[i];if(!f->glass_attached&&f->x+65>=c->ox&&f->x-65<c->ox+c->w&&f->y+40>=c->oy&&f->y-40<c->oy+c->h)draw_fish(c,t,f);}
   }
  }
  draw_algae(&front,t);draw_snail(&front,t,false);

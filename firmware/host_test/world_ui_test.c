@@ -22,10 +22,10 @@ static goal_t play(const tank_t *t,int i,bool req){(void)t;(void)i;(void)req;ret
 static void ppm(int frame,uint16_t *fb){char name[120];snprintf(name,sizeof name,"../outputs/world-prototype/frame-%03d.ppm",frame);FILE *f=fopen(name,"wb");assert(f);fprintf(f,"P6\n640 172\n255\n");for(int i=0;i<WP_W*WP_H;i++){uint16_t c=fb[i];unsigned char p[3]={(c>>11)*255/31,((c>>5)&63)*255/63,(c&31)*255/31};fwrite(p,1,3,f);}fclose(f);}
 static void center_tests(void){
  ui349_state_t s={0};wp_camera_init(&s.world_camera);int16_t a[3];sample(18,12,a);
- s.world_camera.x=64;s.world_camera.y=0;
+ s.world_camera.x=64;s.world_camera.y=WP_Y_MIN;
  assert(ui349_center_view(&s,a,false,100000,350000));assert(s.center_result==1&&s.world_ready);
- assert(s.world_camera.x==32&&s.world_camera.y==12);
- assert(wp_camera_step(&s.world_camera,a,false,350000,350000,.1f));assert(s.world_camera.x==32&&s.world_camera.y==12);
+ assert(s.world_camera.x==32&&s.world_camera.y==WP_Y_CENTER);
+ assert(wp_camera_step(&s.world_camera,a,false,350000,350000,.1f));assert(s.world_camera.x==32&&s.world_camera.y==WP_Y_CENTER);
  wp_camera_t before=s.world_camera;
  assert(!ui349_center_view(&s,a,false,100000,350001));assert(s.center_result==-1&&!memcmp(&before,&s.world_camera,sizeof before));
  assert(!ui349_center_view(&s,a,false,400000,350000));assert(!ui349_center_view(&s,NULL,false,350000,350000));
@@ -40,21 +40,43 @@ static void center_tests(void){
  ui349_input(&s,true,590,80,&down,&x,&y);ui349_input(&s,true,560,80,&down,&x,&y);assert(ui349_input(&s,false,560,80,&down,&x,&y)==UI349_CONSUMED);
  ui349_input(&s,true,590,80,&down,&x,&y);ui349_configure(&s,(ui349_view_t){0,"TANK",true,0});assert(ui349_input(&s,false,590,80,&down,&x,&y)!=UI349_CENTER_VIEW);
  s.controls_hidden=true;ui349_input(&s,true,590,80,&down,&x,&y);assert(ui349_input(&s,false,590,80,&down,&x,&y)!=UI349_CENTER_VIEW);
- for(int side=0;side<2;side++){sample(side?80:-80,side?70:-70,a);for(int i=0;i<200;i++)wp_camera_step(&s.world_camera,a,false,400000,400000,.1f);assert(s.world_camera.x>=0&&s.world_camera.x<=64&&s.world_camera.y>=0&&s.world_camera.y<=24);}
+ for(int side=0;side<2;side++){sample(side?80:-80,side?70:-70,a);for(int i=0;i<200;i++)wp_camera_step(&s.world_camera,a,false,400000,400000,.1f);assert(s.world_camera.x>=0&&s.world_camera.x<=64&&s.world_camera.y>=WP_Y_MIN&&s.world_camera.y<=WP_Y_MAX);}
  puts("PASS CENTER VIEW: valid/posture neutral, default origin, stale/future/missing/railed/zero-g rejection, 250ms boundary, frozen touch, release ownership/drag cancellation, hidden controls, tank changes and travel bounds");
 }
+static void zoom_tests(void){
+ ui349_state_t u={0};wp_camera_init(&u.world_camera);u.world_ready=true;
+ ui349_configure(&u,(ui349_view_t){200,"OPTIONS",true,0});bool down;int x,y;
+ assert(ui349_input(&u,true,590,135,&down,&x,&y)==UI349_CONSUMED&&!down);
+ assert(!ui349_toggle_zoom(&u)&&!u.world_camera.overview);
+ assert(ui349_input(&u,false,590,135,&down,&x,&y)==UI349_ZOOM&&!down);
+ assert(ui349_toggle_zoom(&u)&&u.world_camera.overview);
+ int16_t a[3];sample(0,0,a);assert(ui349_center_view(&u,a,false,100000,100000)&&u.world_camera.overview);
+ float oldx=u.world_camera.x,oldy=u.world_camera.y;
+ sample(15,-15,a);for(int i=0;i<100;i++)wp_camera_step(&u.world_camera,a,false,100000,100000,.1f);
+ assert(oldx==u.world_camera.x&&oldy==u.world_camera.y);
+ for(int d=0;d<3;d++)for(int sy=0;sy<WP_H;sy++)for(int sx=0;sx<WP_W;sx++){
+  float wx,wy,px,py;wp_map(&u.world_camera,d,sx,sy,&wx,&wy);wp_project(&u.world_camera,d,wx,wy,&px,&py);
+  assert(wx>=0&&wx<=TANK_W-1&&wy>=0&&wy<=TANK_H-1&&fabsf(px-sx)<.001f&&fabsf(py-sy)<.001f);
+ }
+ for(int slot=0;slot<3;slot++){u.active_slot=slot;ui349_world_slot_changed(&u);assert(u.world_camera.overview);}
+ ui349_configure(&u,(ui349_view_t){0,"TANK",true,0});u.controls_hidden=true;
+ ui349_input(&u,true,300,90,&down,&x,&y);assert(down&&!ui349_toggle_zoom(&u));ui349_input(&u,false,300,90,&down,&x,&y);
+ assert(u.world_camera.overview&&ui349_toggle_zoom(&u)&&!u.world_camera.overview);
+ puts("PASS zoom release ownership, toggle blocked during gesture, exact full-world bounds/inverse maps, no tilt crop while Off, recenter and tank-switch mode retention");
+}
 int main(void){
+ zoom_tests();
  center_tests();
  setvbuf(stdout,NULL,_IONBF,0);_Static_assert(sizeof(wp_saved_t)==64,"fixed extension payload");
  wp_camera_t cam;wp_camera_init(&cam);int16_t a[3]={429,-16189,637};wp_recenter(&cam,a,false);
- for(int i=0;i<90;i++){a[0]=429+i%20-10;assert(wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f));}assert(cam.x==32&&cam.y==12);
+ for(int i=0;i<90;i++){a[0]=429+i%20-10;assert(wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f));}assert(cam.x==32&&cam.y==WP_Y_CENTER);
  wp_camera_init(&cam);sample(0,0,a);wp_recenter(&cam,a,false);
- for(int i=0;i<150;i++){sample(15,0,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1 && cam.y==12);
- for(int i=0;i<150;i++){sample(-15,15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x>63&&cam.y>23);
- for(int i=0;i<150;i++){sample(15,-15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1&&cam.y<1);
+ for(int i=0;i<150;i++){sample(15,0,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1 && cam.y==WP_Y_CENTER);
+ for(int i=0;i<150;i++){sample(-15,15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x>63&&cam.y>WP_Y_MAX-1);
+ for(int i=0;i<150;i++){sample(15,-15,a);wp_camera_step(&cam,a,false,100000+i*33000,100000+i*33000,1/30.f);}assert(cam.x<1&&cam.y<WP_Y_MIN+1);
  cam.frozen=true;float old=cam.x;sample(15,0,a);wp_camera_step(&cam,a,false,100000,100000,.1f);assert(cam.x==old);cam.frozen=false;
  assert(!wp_camera_step(&cam,a,false,100000,400001,.1f));a[0]=32767;assert(!wp_camera_step(&cam,a,false,400000,400000,.1f));
- for(int d=0;d<3;d++)for(int pos=0;pos<3;pos++){cam.x=pos*32;cam.y=pos*12;for(int y=0;y<WP_H;y++)for(int x=0;x<WP_W;x++){float wx,wy,sx,sy;wp_map(&cam,d,(float)x,(float)y,&wx,&wy);wp_project(&cam,d,wx,wy,&sx,&sy);assert(sx==x&&sy==y);}}
+ for(int d=0;d<3;d++)for(int pos=0;pos<3;pos++){cam.x=pos*32;cam.y=WP_Y_MIN+pos*12;for(int y=0;y<WP_H;y++)for(int x=0;x<WP_W;x++){float wx,wy,sx,sy;wp_map(&cam,d,(float)x,(float)y,&wx,&wy);wp_project(&cam,d,wx,wy,&sx,&sy);assert(sx==x&&sy==y);}}
  puts("PASS recorded neutral/jitter, smoothing/end stops, stale/railed rejection, frozen gesture and all 990720 layer/camera pixel roundtrips");
  tank_t t;ready(&t);memset(&t.world,0,sizeof t.world);t.sd_unlocks|=1u<<7;int skull1=wp_buy(&t,&t.world,7,520,2),skull2=wp_buy(&t,&t.world,7,520,2);assert(skull1>=2&&skull2>=2&&wp_quantity(&t,&t.world,7)==3);
  wp_camera_init(&cam);float sx,sy;wp_project(&cam,2,520,TANK_H-30,&sx,&sy);int picked=wp_hit(&cam,&t.world,sx,sy,-1);assert(picked==skull2&&wp_hit(&cam,&t.world,sx,sy,picked)==skull1);assert(wp_move(&t.world,skull2,950,1));
@@ -65,7 +87,7 @@ int main(void){
  t.fish[0].x=1100;t.fish[0].y=260;char encoding[640];advisor_core_encode(&t,0,encoding,sizeof encoding);assert(strstr(encoding,"bubble near"));tank_t copied=t;advisor_core_encode(&copied,0,encoding,sizeof encoding);assert(strstr(encoding,"bubble near"));
  wp_camera_init(&cam);cam.x=64;float offx=t.fish[1].x;t.fish[1].x=20;t.fish[1].goal.id=GOAL_VISIT_BUBBLES;float age=progression_age_s(&t,1);for(int i=0;i<120;i++){wp_tick(&t,&t.world,.05f,play);progression_tick(&t,.05f);}assert(progression_age_s(&t,1)>age+5&&t.fish[1].x!=20);(void)offx;
  puts("PASS duplicate purchases/quantities/independent moves/overlap cycling/single sale, four-source cap, stable per-fish choice and removal retarget, matching advisor sighting, offscreen simulation");
- ready(&t);memset(t.algae,255,sizeof t.algae);memset(t.veg_h,0,sizeof t.veg_h);wp_camera_init(&cam);cam.x=48;cam.y=12;float wx,wy;wp_map(&cam,2,200,60,&wx,&wy);int cell=(int)(wy/ALGAE_CELL)*ALGAE_COLS+(int)(wx/ALGAE_CELL_X);wp_wipe(&t,&cam,170,60,235,60);assert(t.algae[cell]<255);assert(t.algae[0]==255);
+ ready(&t);memset(t.algae,255,sizeof t.algae);memset(t.veg_h,0,sizeof t.veg_h);wp_camera_init(&cam);cam.x=48;cam.y=WP_Y_CENTER;float wx,wy;wp_map(&cam,2,200,60,&wx,&wy);int cell=(int)(wy/ALGAE_CELL)*ALGAE_COLS+(int)(wx/ALGAE_CELL_X);wp_wipe(&t,&cam,170,60,235,60);assert(t.algae[cell]<255);assert(t.algae[0]==255);
  puts("PASS visible foreground glass cleaning updates matching world cell, distant cell unchanged");
  ready(&t);memset(&t.world,0,sizeof t.world);t.sd_unlocks=SD_ITEM_PLANT|SD_ITEM_CASTLE|SD_ITEM_FERN|SD_ITEM_WOOD|SD_ITEM_STONES;t.uv.style=1;t.night=false;t.plant_x=780;t.castle_x=580;t.castle_z=DECOR_Z_BACK;
  tank_set_species(&t,0,SPECIES_TIGER_BARB);tank_set_species(&t,1,SPECIES_NEON);t.fish[0].x=550;t.fish[0].y=240;t.fish[1].x=1120;t.fish[1].y=235;
@@ -79,12 +101,21 @@ int main(void){
  fclose(trace);printf("PASS 90 native viewport frames, framebuffer guards, eight copies / four sources; total render+physics+PPM CPU %.3fs (HOST ONLY)\n",(double)(clock()-begin)/CLOCKS_PER_SEC);
  uint16_t *reference=calloc(WP_VIEW_W*WP_VIEW_H,2);assert(reference);
  for(int mode=0;mode<3;mode++)for(int edge=0;edge<3;edge++){
-  t.night=mode==2;t.uv.style=mode==1;cam.x=edge*32;cam.y=edge*12;
+  t.night=mode==2;t.uv.style=mode==1;cam.x=edge*32;cam.y=WP_Y_MIN+edge*12;
   render_world_proto(&t,&t.world,&cam,buf+1);render_world_reference(&t,&t.world,&cam,reference);
   for(int y=1;y<WP_H-1;y++)for(int x=0;x<WP_W;x++)assert(buf[1+y*WP_W+x]==reference[y*WP_SCALE*WP_VIEW_W+x*WP_SCALE]);
   assert(buf[0]==0x1234&&buf[n+1]==0xabcd);
  }
  free(reference);puts("PASS wide renderer equals full-resolution reference sampling in White/UV/Off at both ends and neutral; framebuffer guards");
+ reference=calloc(TANK_W*TANK_H,2);assert(reference);tank_t unchanged=t;
+ cam.overview=true;
+ for(int mode=0;mode<3;mode++){
+  t.night=mode==2;t.uv.style=mode==1;render_world_proto(&t,&t.world,&cam,buf+1);render_world_reference(&t,&t.world,&cam,reference);
+  for(int y=1;y<WP_H-1;y++)for(int x=0;x<WP_W;x++)assert(buf[1+y*WP_W+x]==reference[(y*(TANK_H-1)/(WP_H-1))*TANK_W+x*(TANK_W-1)/(WP_W-1)]);
+  ppm(150+mode,buf+1);assert(buf[0]==0x1234&&buf[n+1]==0xabcd);
+ }
+ t.night=unchanged.night;t.uv.style=unchanged.uv.style;assert(!memcmp(&t,&unchanged,sizeof t));free(reference);cam.overview=false;
+ puts("PASS full-tank overview reference pixels in White/UV/Off, no tank mutation, framebuffer guards");
  ready(&t);t.n_fish=5;float fishx[]={120,380,650,950,1220};wp_camera_init(&cam);
  for(int i=0;i<5;i++){if(i>1)t.fish[i]=t.fish[0];t.fish[i].x=fishx[i];t.fish[i].y=130+i*30;t.fish[i].species=i;float sx,sy;wp_project(&cam,1,t.fish[i].x,t.fish[i].y,&sx,&sy);assert(sx>30&&sx<610&&sy>30&&sy<150);}
  render_world_proto(&t,&t.world,&cam,buf+1);ppm(140,buf+1);
@@ -92,8 +123,8 @@ int main(void){
  for(int i=0;i<5;i++){fish_t keep=t.fish[i];t.fish[i].x=-1000;render_world_proto(&t,&t.world,&cam,without);int changed=0;for(size_t k=0;k<n;k++)changed+=without[k]!=buf[k+1];assert(changed>20);t.fish[i]=keep;}free(without);
  puts("PASS five widely separated fish visibly rendered simultaneously at neutral; 95% width / 93% height coverage");
 
- ui349_state_t ui={0};ui.controls_hidden=true;ui.copy_selected=-1;wp_camera_init(&ui.world_camera);ui.world_camera.x=48;ui.world_camera.y=12;ui349_configure(&ui,(ui349_view_t){0,"TANK",true,0});
- for(int y=0;y<172;y++)for(int x=0;x<640;x++){int tx,ty;assert(ui349_map(&ui,x,y,&tx,&ty));assert(tx==x*WP_SCALE+48&&ty==y*WP_SCALE+12);}
+ ui349_state_t ui={0};ui.controls_hidden=true;ui.copy_selected=-1;wp_camera_init(&ui.world_camera);ui.world_camera.x=48;ui.world_camera.y=WP_Y_CENTER;ui349_configure(&ui,(ui349_view_t){0,"TANK",true,0});
+ for(int y=0;y<172;y++)for(int x=0;x<640;x++){int tx,ty;assert(ui349_map(&ui,x,y,&tx,&ty));assert(tx==x*WP_SCALE+48&&ty==y*WP_SCALE+WP_Y_CENTER);}
  bool down;int tx,ty;assert(ui349_input(&ui,true,300,90,&down,&tx,&ty)==UI349_PASS&&down&&ui.world_camera.frozen);ui349_input(&ui,false,0,0,&down,&tx,&ty);assert(!ui.world_camera.frozen);
  ui.controls_hidden=false;assert(!ui349_map(&ui,200,20,&tx,&ty));assert(ui349_input(&ui,true,250,25,&down,&tx,&ty)==UI349_CONSUMED);assert(ui349_input(&ui,false,250,25,&down,&tx,&ty)==UI349_SLOT_PICK+1);
  ui.copy_picker=true;ui.copy_item=8;ui.copy_selected=2;ui.copy_depth=1;
@@ -101,11 +132,21 @@ int main(void){
  ui349_render(&ui,&t,NULL,buf+1);assert(buf[0]==0x1234&&buf[n+1]==0xabcd);ppm(100,buf+1);
  ui.copy_picker=false;ui.copy_placing=true;assert(ui349_input(&ui,true,590,25,&down,&tx,&ty)==UI349_CONSUMED);assert(ui349_input(&ui,false,590,25,&down,&tx,&ty)==UI349_COPY_DONE);
  ui.copy_placing=false;ui.controls_hidden=true;
- memset(&t.world,0,sizeof t.world);t.sd_balance=10000;t.sd_unlocks=0;wp_buy(&t,&t.world,6,480,1);wp_buy(&t,&t.world,6,555,1);wp_buy(&t,&t.world,8,650,1);wp_buy(&t,&t.world,7,760,1);ui.world_camera.x=32;ui.world_camera.y=12;
+ memset(&t.world,0,sizeof t.world);t.sd_balance=10000;t.sd_unlocks=0;wp_buy(&t,&t.world,6,480,1);wp_buy(&t,&t.world,6,555,1);wp_buy(&t,&t.world,8,650,1);wp_buy(&t,&t.world,7,760,1);ui.world_camera.x=32;ui.world_camera.y=WP_Y_CENTER;
  for(int mode=0;mode<3;mode++)for(int frame=0;frame<4;frame++){t.night=mode==2;t.uv.style=mode==1;t.clock=frame*3;ui349_render(&ui,&t,NULL,buf+1);assert(buf[0]==0x1234&&buf[n+1]==0xabcd);ppm(110+mode*4+frame,buf+1);}
  int releases=0;float previous=-1;for(int step=0;step<4800;step++){decor_motion_t m=decor_motion(step*.01f,0);assert(m.lid>=0&&m.lid<=1&&m.fill>=0&&m.fill<=4&&fabsf(m.bob)<=2.21f&&fabsf(m.stroke)<=3.01f);if(m.big_rise>=0&&previous<0)releases++;previous=m.big_rise;}assert(releases==4);assert(decor_motion(0,2).phase!=decor_motion(0,3).phase);
  puts("PASS native pixel mapping, gesture freeze, visible selectors, duplicate BUY/DONE rails, UI guards, White/UV/Off visuals; four chest releases in four cycles, bounded particles/motion and independent phases");
  uint16_t *settings=calloc(TANK_W*TANK_H,2);assert(settings);render_settings(&t,settings,TANK_W,100,2);ui.controls_hidden=false;ui349_configure(&ui,(ui349_view_t){200,"OPTIONS",true,0});
  for(int result=-1;result<=1;result++){ui.center_result=result;ui349_render(&ui,&t,settings,buf+1);assert(buf[0]==0x1234&&buf[n+1]==0xabcd);ppm(131+result,buf+1);}free(settings);
+ ui.world_camera.overview=true;settings=calloc(TANK_W*TANK_H,2);render_settings(&t,settings,TANK_W,100,2);ui349_render(&ui,&t,settings,buf+1);ppm(153,buf+1);free(settings);
+ ready(&t);t.n_fish=0;t.sd_unlocks=0;memset(t.algae,0,sizeof t.algae);memset(&t.world,0,sizeof t.world);
+ for(int zoom=0;zoom<2;zoom++)for(int mode=0;mode<3;mode++)for(int edge=0;edge<3;edge++){
+  cam.overview=zoom;cam.x=edge*32;cam.y=WP_Y_MIN+edge*12;t.night=mode==2;t.uv.style=mode==1;render_world_proto(&t,&t.world,&cam,buf+1);
+  unsigned colors[3]={mode==1?0x263846:0x343c31,mode==1?0x48616a:0x6a7060,mode==1?0x354955:0x4b5243};uint16_t allowed[3];
+  for(int k=0;k<3;k++){float dim=mode==2?.45f:1;int r=(int)((colors[k]>>16)*dim),g=(int)(((colors[k]>>8)&255)*dim),b=(int)((colors[k]&255)*dim);allowed[k]=(r>>3)<<11|(g>>2)<<5|(b>>3);}
+  for(int y=WP_H-3;y<WP_H-1;y++)for(int x=0;x<WP_W;x++){uint16_t p=buf[1+y*WP_W+x];assert(p==allowed[0]||p==allowed[1]||p==allowed[2]);}
+  ppm(160+zoom*9+mode*3+edge,buf+1);
+ }
+ puts("PASS continuous gravel across every bottom pixel and both sides in White/UV/Off, neutral/tilt extremes and overview; physics/save dimensions unchanged");
  printf("Memory: native RGB565 %zu bytes; persistent extension %zu; camera %zu; objects %zu; existing world tank %zu bytes\n",n*2,sizeof(wp_saved_t),sizeof cam,sizeof t.world,sizeof t);free(buf);return 0;
 }

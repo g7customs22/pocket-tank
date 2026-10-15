@@ -168,7 +168,7 @@ static int rail_hit(const ui349_state_t *s, int x, int y) {
 #ifdef POCKET_WORLD_PROTO
         if(s->view.key==200&&x>=552&&x<632){
             if(y>=66&&y<110)return UI349_CENTER_VIEW;
-            if(y>=116&&y<160)return UI349_CONSUMED;
+            if(y>=116&&y<160)return UI349_ZOOM;
         }
 #endif
         if(s->view.key==400 && x>=8 && x<84 && y>=6 && y<34)return UI349_TANKS;
@@ -332,10 +332,11 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
 #ifdef POCKET_WORLD_PROTO
             if(s->view.key==200){
                 button(native,552,66,80,44,"",1,true);
-                text(native,574,73,1,0xa9e2dd,"CENTER");text(native,580,87,1,0xa9e2dd,"VIEW");
-                rect(native,552,116,80,44,0x0b2029);
-                text(native,556,123,1,0xa9e2dd,s->center_result==1?"CENTERED":"HOLD STILL");
-                text(native,556,139,1,0xa9e2dd,s->center_result<0?"TRY AGAIN":s->center_result==1?"TAP TANK":"THEN TAP");
+                text(native,574,71,1,0xa9e2dd,"CENTER");text(native,580,82,1,0xa9e2dd,"VIEW");
+                text(native,556,99,1,0xa9e2dd,s->center_result==1?"CENTERED":s->center_result<0?"TRY AGAIN":"HOLD STILL");
+                button(native,552,116,80,44,"",1,true);
+                text(native,562,123,1,0xa9e2dd,s->world_camera.overview?"ZOOM OFF":"ZOOM ON");
+                text(native,562,140,1,0xa9e2dd,s->world_camera.overview?"FULL TANK":"TILT VIEW");
             }
 #endif
         } else {

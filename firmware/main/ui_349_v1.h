@@ -68,6 +68,10 @@ static inline void ui349_world_slot_changed(ui349_state_t *s){
     s->copy_picker=s->copy_placing=false;s->copy_selected=-1;s->center_result=0;
     /* Camera neutral belongs to the device posture, not a saved aquarium. */
 }
+static inline bool ui349_toggle_zoom(ui349_state_t*s){
+    if(s->owner||!wp_set_zoom(&s->world_camera,s->world_camera.overview))return false;
+    s->center_result=0;return true;
+}
 #endif
 /* First-sample presses. Short contacts need a prompt release so two taps do
  * not become one hold. Established holds/drags retain the 50 ms dropout bridge. */
@@ -93,7 +97,7 @@ static inline void ui349_contact(ui349_contact_t *s, int64_t now, bool *down, ui
 }
 
 enum { UI349_COPIES=400,UI349_COPY_BACK,UI349_COPY_PREV,UI349_COPY_NEXT,UI349_COPY_BUY,UI349_COPY_MOVE,UI349_COPY_DEPTH,UI349_COPY_SELL,UI349_COPY_DONE };
-enum { UI349_CENTER_VIEW=420 };
+enum { UI349_CENTER_VIEW=420,UI349_ZOOM };
 enum { UI349_PASS, UI349_CONSUMED, UI349_MENU, UI349_SETTINGS, UI349_SHOP, UI349_CLOSE, UI349_NEXT, UI349_SPECIES, UI349_SPECIES_BACK, UI349_HABITAT=20, UI349_HABITAT_BACK, UI349_TANKS, UI349_TANKS_BACK, UI349_TANK_STYLE, UI349_SPECIES_PREV, UI349_SPECIES_NEXT, UI349_UNDO, UI349_SLOT_PICK=300, UI349_SPECIES_PICK=100, UI349_HABITAT_PICK=200 };
 /* Active tank taps are consumed by the rail, but never dispatch a switch. */
 static inline int ui349_slot_request(const ui349_state_t *s,int action){

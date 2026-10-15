@@ -1,4 +1,5 @@
 #include "decor_motion.h"
+#include "world_proto.h"
 /* render.c — porthole look: deep gradient water, AMOLED-black floor, procedural
  * fish (body polygon + animated tail + earned markings), bubbles, reef fronds
  * that grow with the tank's milestones. Everything is drawn
@@ -26,8 +27,16 @@ static ctx_t ctx_full(uint16_t *fb, int stride, float dim) {
 static ctx_t ctx_world(uint16_t *fb, int stride, float dim) {
     ctx_t c = { fb, stride, dim, 0, 0, TANK_W, TANK_H }; return c;
 }
-#define CTX_IN(c, x, y) ((unsigned)((x) - (c)->ox) < (unsigned)(c)->w && (unsigned)((y) - (c)->oy) < (unsigned)(c)->h && (!(c)->shrink || !((((x)-(c)->ox) | ((y)-(c)->oy))&1)))
-#define CTX_PX(c, x, y) ((c)->fb[(((y) - (c)->oy) >> (c)->shrink) * (c)->stride + (((x) - (c)->ox) >> (c)->shrink)])
+/* Exact nearest-neighbour samples, with the complete world endpoints included
+ * in overview. Unscaled pages and the 2:1 window retain their fast paths. */
+static inline int ctx_ix(const ctx_t*c,int x){int d=x-c->ox;return c->shrink==2?(d*(WP_W-1)+TANK_W-2)/(TANK_W-1):d>>c->shrink;}
+static inline int ctx_iy(const ctx_t*c,int y){int d=y-c->oy;return c->shrink==2?(d*(WP_H-1)+TANK_H-2)/(TANK_H-1):d>>c->shrink;}
+static inline bool ctx_sample(const ctx_t*c,int x,int y){
+ if(c->shrink==2)return ctx_ix(c,x)*(TANK_W-1)/(WP_W-1)==x-c->ox && ctx_iy(c,y)*(TANK_H-1)/(WP_H-1)==y-c->oy;
+ return !c->shrink || !((((x)-c->ox)|((y)-c->oy))&1);
+}
+#define CTX_IN(c, x, y) ((unsigned)((x) - (c)->ox) < (unsigned)(c)->w && (unsigned)((y) - (c)->oy) < (unsigned)(c)->h && ctx_sample(c,x,y))
+#define CTX_PX(c, x, y) ((c)->fb[ctx_iy(c,y) * (c)->stride + ctx_ix(c,x)])
 
 /* Dirty mask (2026-09-01): one bit per pixel, set by everything drawn over
  * the baked scene (px, span, blends), cleared every frame. The porthole
@@ -131,13 +140,22 @@ static void px_blend(ctx_t *c, int x, int y, uint32_t rgb, int a) {
 /* horizontal span [x0,x1] on row y, clipped to the frame, pre-dimmed source */
 static inline void span(ctx_t *c, int x0, int x1, int y, const src_t *s, int alpha) {
     if ((unsigned)(y - c->oy) >= (unsigned)c->h) return;
-    if(c->shrink && ((y-c->oy)&1))return;
+    if(!ctx_sample(c,c->ox,y))return;
     if (x0 < c->ox) x0 = c->ox;
     if (x1 > c->ox + c->w - 1) x1 = c->ox + c->w - 1;
-    if(c->shrink)x0+=(x0-c->ox)&1;
+    if(c->shrink==1)x0+=(x0-c->ox)&1;
     if (x0 > x1) return;
     bb_add(x0, x1, y);
     dirty_span(x0, x1, y);
+    if(c->shrink==2){
+        int first=ctx_ix(c,x0),last=ctx_ix(c,x1+1)-1;
+        uint16_t *p=c->fb+ctx_iy(c,y)*c->stride+first;
+        for(int x=first;x<=last;x++,p++){
+            if(c->monochrome){if(alpha>0)*p=c->ink;}
+            else if(alpha>=255)*p=s->v;else blend565(p,s,alpha);
+        }
+        return;
+    }
     uint16_t *p = &CTX_PX(c, x0, y);
     int step=1<<c->shrink;
     if (c->monochrome) { if (alpha > 0) for (int x = x0; x <= x1; x+=step) *p++ = c->ink; }
