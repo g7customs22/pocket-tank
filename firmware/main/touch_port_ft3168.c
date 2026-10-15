@@ -394,7 +394,7 @@ select_creature:;
                                                   (no feed, no light-toggle burst) */
             else {
 #ifdef POCKET_WORLD_PROTO
-                if(s_press_world&&s_press_screen_y<22)tank_feed(t,s_px,3);
+                if(s_press_world&&ui349_feed_zone(s_press_screen_y,false))tank_feed(t,s_px,3);
                 else
 #endif
                 tank_touch_tap(t,s_px,s_py);
@@ -402,7 +402,7 @@ select_creature:;
         }
         else if (!modal &&
 #ifdef POCKET_WORLD_PROTO
-            (s_press_world?s_press_screen_y<30:s_py<60)
+            (s_press_world?ui349_feed_zone(s_press_screen_y,true):s_py<60)
 #else
             s_py<60
 #endif

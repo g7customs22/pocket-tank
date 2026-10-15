@@ -97,6 +97,10 @@ static inline void ui349_contact(ui349_contact_t *s, int64_t now, bool *down, ui
 }
 
 enum { UI349_COPIES=400,UI349_COPY_BACK,UI349_COPY_PREV,UI349_COPY_NEXT,UI349_COPY_BUY,UI349_COPY_MOVE,UI349_COPY_DEPTH,UI349_COPY_SELL,UI349_COPY_DONE };
+/* Screen-space feeding band: eight extra pixels in either zoom mode. */
+static inline bool ui349_feed_zone(float screen_y, bool drag) {
+    return screen_y >= 0 && screen_y < (drag ? 38 : 30);
+}
 enum { UI349_CENTER_VIEW=420,UI349_ZOOM };
 enum { UI349_PASS, UI349_CONSUMED, UI349_MENU, UI349_SETTINGS, UI349_SHOP, UI349_CLOSE, UI349_NEXT, UI349_SPECIES, UI349_SPECIES_BACK, UI349_HABITAT=20, UI349_HABITAT_BACK, UI349_TANKS, UI349_TANKS_BACK, UI349_TANK_STYLE, UI349_SPECIES_PREV, UI349_SPECIES_NEXT, UI349_UNDO, UI349_SLOT_PICK=300, UI349_SPECIES_PICK=100, UI349_HABITAT_PICK=200 };
 /* Active tank taps are consumed by the rail, but never dispatch a switch. */

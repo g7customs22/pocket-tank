@@ -641,7 +641,7 @@ static void tank_task(void *arg) {
             int64_t t0 = esp_timer_get_time();
             bool native_scene=false;
 #ifdef POCKET_WORLD_PROTO
-            native_scene=!setup_active()&&!touch_port_confirm_up()&&!touch_port_settings()&&!touch_port_shop()&&!touch_port_milestones()&&!touch_port_battery()&&touch_port_selected()<0&&(g_ui349.controls_hidden||!notice_current());
+            native_scene=!setup_active()&&!touch_port_confirm_up()&&!touch_port_settings()&&!touch_port_shop()&&!touch_port_milestones()&&!touch_port_battery()&&touch_port_selected()<0&&!notice_current();
 #endif
             if(!native_scene)render_tank(&tank, fb[cur], TANK_W);
             touch_port_poll(&tank);          /* the CST816 is polled, not interrupt-
@@ -661,7 +661,7 @@ static void tank_task(void *arg) {
             else if (touch_port_settings()) view = (ui349_view_t){200, "OPTIONS", true, 0};
             else if (touch_port_shop()) view = (ui349_view_t){300, "SHOP", true, 0};
             else if (touch_port_milestones()) view = (ui349_view_t){400, "MENU", true, 0};
-            else if (controls_visible && notice_current()) view = (ui349_view_t){500, "NEWS", true, 76};
+            else if (notice_current()) view = (ui349_view_t){500, "NEWS", true, 92};
             else if (touch_port_battery()) view = (ui349_view_t){600, "BATTERY", true, 0};
             else if (sel >= 0) view = (ui349_view_t){700 + sel, "FISH", true, 0};
             /* Opening a description is a view change even within the same menu.
@@ -700,7 +700,7 @@ static void tank_task(void *arg) {
             }
             if (!touch_port_milestones() && !touch_port_settings() && !touch_port_shop()) {   /* an announcement over the live tank */
                 const notice_t *nt = notice_current();
-                if (controls_visible && nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
+                if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
             if (setup_active()
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
