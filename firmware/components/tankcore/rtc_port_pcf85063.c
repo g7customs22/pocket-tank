@@ -63,22 +63,27 @@ bool rtc_port_set_utc(int64_t epoch) {
     time_t target=(time_t)epoch; struct tm t;
     if(!s_dev || !gmtime_r(&target,&t) || t.tm_year<124 || t.tm_year>199) return false;
     uint8_t reg=0,old[11],w[8]={4};
-    if(i2c_master_transmit_receive(s_dev,&reg,1,old,sizeof old,100)!=ESP_OK || (old[0]&0x28))return false;
-    /* Reject stopped or 12-hour mode; never alter unrelated control bits. */
+    if(i2c_master_transmit_receive(s_dev,&reg,1,old,sizeof old,100)!=ESP_OK || (old[0]&0x20))return false;
+    /* Explicit setting uses 24-hour format (Control_1 bit 3). Preserve all
+     * other control bits; a STOP condition requires separate diagnosis. */
     int v[]={t.tm_sec,t.tm_min,t.tm_hour,t.tm_mday,t.tm_wday,t.tm_mon+1,t.tm_year-100};
     for(int i=0;i<7;i++)w[i+1]=(uint8_t)((v[i]/10)*16+v[i]%10);
     struct timeval prior;gettimeofday(&prior,NULL);
     bool was_trusted=s_trusted;s_trusted=false;
     if(!slot_system_save()){s_trusted=was_trusted;return false;}
     time_t a=0,b=0;
-    bool ok=i2c_master_transmit(s_dev,w,sizeof w,100)==ESP_OK && rtc_read(&a) && a>=target && a-target<=1;
+    uint8_t control[2]={0,(uint8_t)(old[0]&~0x08)};
+    bool ok=!(old[0]&0x08)||i2c_master_transmit(s_dev,control,sizeof control,100)==ESP_OK;
+    ok=ok&&i2c_master_transmit(s_dev,w,sizeof w,100)==ESP_OK && rtc_read(&a) && a>=target && a-target<=1;
     if(ok){vTaskDelay(pdMS_TO_TICKS(1100));ok=rtc_read(&b)&&clock_rtc_advancing(a,b);}
     if(ok){struct timeval tv={.tv_sec=b};ok=settimeofday(&tv,NULL)==0;}
     if(!ok){
         s_trusted=false;w[0]=4;memcpy(w+1,old+4,7);
         bool restored=i2c_master_transmit(s_dev,w,sizeof w,100)==ESP_OK;
-        uint8_t check[7],start=4;
-        restored=restored&&i2c_master_transmit_receive(s_dev,&start,1,check,sizeof check,100)==ESP_OK&&memcmp(check,old+4,7)==0;
+        control[1]=old[0];
+        if(i2c_master_transmit(s_dev,control,sizeof control,100)!=ESP_OK)restored=false;
+        uint8_t check[11],start=0;
+        restored=restored&&i2c_master_transmit_receive(s_dev,&start,1,check,sizeof check,100)==ESP_OK&&memcmp(check,old,11)==0;
         settimeofday(&prior,NULL);
         ESP_LOGE(TAG,"clock set failed; RTC rollback write=%d; offline care disabled; zero baseline retained",restored);
         return false;

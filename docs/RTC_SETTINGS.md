@@ -11,7 +11,8 @@ same transaction as the UI. It runs on the tank task, without concurrent gamepla
 
 Before hardware writes, normal slot saving commits timestamp zero with the live
 gameplay state. RTC calendar writes use the existing PCF85063 seconds-through-year
-register mapping; stopped/12-hour mode is rejected without changing control bits.
+register mapping; explicit setting clears only the 12/24-hour control bit to
+select 24-hour format. Other control bits are preserved; STOP is rejected.
 Readback must match the requested epoch and advance normally. Only then are the
 system clock and a new normal-save baseline established. No offline progression
 function is called. Inactive slots remain frozen and get fresh timestamps when

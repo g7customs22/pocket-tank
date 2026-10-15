@@ -23,6 +23,8 @@ int main(void){
  fresh();fail_save=1;assert(!rtc_port_set_utc(1800000000)&&writes==0);
  fresh();fail_save=2;assert(!rtc_port_set_utc(1800000000)&&!s_trusted&&sysnow==1800000001&&stamps[0]==0);
  fresh();stopped=true;memcpy(original,regs,11);assert(!rtc_port_set_utc(1800000000)&&!memcmp(regs,original,11)&&!s_trusted);
+ fresh();regs[0]=9;assert(rtc_port_set_utc(1800000000)&&regs[0]==1&&s_trusted);
+ fresh();regs[0]=8;fail_write=2;memcpy(original,regs,11);assert(!rtc_port_set_utc(1800000000)&&!memcmp(regs,original,11)&&!s_trusted);
  fresh();regs[0]=32;assert(!rtc_port_set_utc(1800000000)&&writes==0&&saves==0);
  fresh();assert(!rtc_port_set_utc(1)&&writes==0);puts("PASS production RTC forward/backward sync, zero baseline, restart, invalid dates, stopped clock, write rollback and save failures");return 0;
 }
