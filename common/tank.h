@@ -39,19 +39,20 @@ typedef struct { float x[UV_DECOR_COUNT]; uint8_t z[UV_DECOR_COUNT], style, rese
 enum { SPECIES_CLASSIC, SPECIES_PLECO, SPECIES_ANGEL, SPECIES_CLOWN,
        SPECIES_TIGER_BARB, SPECIES_SUNFISH, SPECIES_NEON, SPECIES_GUPPY, SPECIES_DANIO,
        SPECIES_BLUE_TANG, SPECIES_YELLOW_TANG, SPECIES_GRAMMA, SPECIES_BANGGAI,
-       SPECIES_FIREFISH, SPECIES_CHROMIS, SPECIES_PAJAMA, SPECIES_GOBY, SPECIES_WRASSE, SPECIES_CORY, SPECIES_BRISTLE, SPECIES_COUNT };
+       SPECIES_FIREFISH, SPECIES_CHROMIS, SPECIES_PAJAMA, SPECIES_GOBY, SPECIES_WRASSE, SPECIES_CORY, SPECIES_BRISTLE, SPECIES_BLENNY, SPECIES_OCTOPUS, SPECIES_COUNT };
 typedef struct { const char *name; bool marine; } species_info_t;
 static const species_info_t TANK_SPECIES[SPECIES_COUNT] = {
     {"CLASSIC",false},{"PLECO",false},{"ANGELFISH",false},
     {"CLOWNFISH",true},{"TIGER BARB",false},{"SUNFISH",false},
     {"NEON TETRA",false},{"GUPPY",false},{"ZEBRA DANIO",false},
     {"BLUE TANG",true},{"YELLOW TANG",true},{"ROYAL GRAMMA",true},{"BANGGAI",true},
-    {"FIREFISH",true},{"GREEN CHROMIS",true},{"PAJAMA CARDINAL",true},{"NEON GOBY",true},{"SIXLINE WRASSE",true},{"CORYDORAS",false},{"BRISTLENOSE",false}
+    {"FIREFISH",true},{"GREEN CHROMIS",true},{"PAJAMA CARDINAL",true},{"NEON GOBY",true},{"SIXLINE WRASSE",true},{"CORYDORAS",false},{"BRISTLENOSE",false},{"LAWNMOWER BLENNY",true},{"OCTOPUS",true}
 };
 enum { HABITAT_CLASSIC, HABITAT_FRESH, HABITAT_REEF, HABITAT_COUNT };
 static const char *const HABITAT_NAMES[HABITAT_COUNT] = {"STANDARD", "FRESHWATER", "SALTWATER"};
 static inline bool tank_species_allowed(int habitat, int species) {
     if(species<0 || species>=SPECIES_COUNT) return false;
+    if(species==SPECIES_PLECO||species==SPECIES_BRISTLE)return habitat==HABITAT_FRESH;
     return habitat==HABITAT_CLASSIC || (species!=SPECIES_CLASSIC &&
            (habitat==HABITAT_REEF ? TANK_SPECIES[species].marine : !TANK_SPECIES[species].marine));
 }
@@ -486,7 +487,8 @@ typedef struct tank {
  * a poll: an async advisor returns a completed decision the moment it's
  * ready; otherwise return the fish's current goal unchanged. */
 static inline const char *tank_species_role(int species) {
-    if(species==SPECIES_PLECO||species==SPECIES_BRISTLE)return "ALGAE GRAZER";
+    if(species==SPECIES_OCTOPUS)return "PEACEFUL CAVE EXPLORER";
+    if(species==SPECIES_PLECO||species==SPECIES_BRISTLE||species==SPECIES_BLENNY)return "ALGAE GRAZER";
     if(species==SPECIES_CORY)return "FALLEN FOOD";
     if(species==SPECIES_GOBY)return "FISH CLEANER";
     return "SWIMMER";

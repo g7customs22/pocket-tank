@@ -15,7 +15,7 @@ static inline unsigned v1_backlight_drive(unsigned level) {
 /* Additional contrast between user levels without entering the LED cutoff.
  * Q8 gains are a visual starting point, not measured luminance percentages. */
 static inline unsigned v1_image_gain(unsigned percent) {
-    return percent <= 30 ? 128u : percent <= 60 ? 192u : 256u;
+    return percent <= 5 ? 32u : percent <= 10 ? 64u : percent <= 30 ? 128u : percent <= 60 ? 192u : 256u;
 }
 static inline uint16_t v1_dim_pixel(uint16_t p, unsigned gain) {
     unsigned r=(((p>>11)&31)*gain+128)>>8;

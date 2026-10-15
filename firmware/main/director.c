@@ -22,6 +22,9 @@
 #include "imu_port.h"
 #include "audio.h"
 #include "notice.h"
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+#include "ui_349_v1.h"
+#endif
 #include "esp_timer.h"
 #include "nvs.h"
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
@@ -400,7 +403,10 @@ static void run(tank_t *t, char *line) {
         tank_set_name(t, who, argv[2]); progression_save(t);
         ESP_LOGI(TAG, "fish %d is now %s (saved)", who, t->fish[who].name);
     } else if (!strcmp(c, "save")) {
-        progression_save(t); ESP_LOGI(TAG, "saved");
+        bool saved=progression_save(t); ESP_LOGI(TAG, "%s",saved?"saved":"SAVE FAILED");
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        ui349_message(saved?"SAVED":"SAVE FAILED / TRY AGAIN");
+#endif
     } else if (!strcmp(c, "stash")) {
         stash(t);
     } else if (!strcmp(c, "restore")) {

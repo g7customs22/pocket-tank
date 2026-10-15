@@ -2,6 +2,8 @@
 #include "notice.h"
 #include "sounds.h"
 #include <string.h>
+#include <stdio.h>
+#include "progression.h"
 
 static uint32_t s_ms[N_FISH_MAX], s_tms;
 static stage_t  s_stage[N_FISH_MAX];
@@ -11,6 +13,12 @@ static int      s_qn;
 static notice_t s_cur;
 static bool     s_up;
 static float    s_gap;                       /* seconds until the next may come up */
+static const char *const HISTORY_STAGES[]={"FRY","JUVENILE","ADULT","ELDER"};
+static notice_history_t s_history[NOTICE_HISTORY];
+static int s_history_n;
+static const tank_t *s_history_tank;
+int notice_history_count(void){return s_history_n;}
+const notice_history_t *notice_history_get(int i){return i>=0&&i<s_history_n?&s_history[i]:NULL;}
 static int      s_cue = -1;
 
 /* never announced: they belong to the birth of a tank or a fish */
@@ -19,17 +27,29 @@ static int      s_cue = -1;
 #define MS_STAGES   (MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER)
 
 static void push(int kind, int fish, uint32_t bit) {
+    if(s_history_tank){
+        const tank_t *t=s_history_tank;const fish_t *f=fish>=0&&fish<t->n_fish?&t->fish[fish]:NULL;
+        int bi=0;while(bi<31&&!(bit&(1u<<bi)))bi++;
+        const char *event=kind==NOTICE_LOW_BATTERY?"LOW BATTERY":kind==NOTICE_STAGE&&f?HISTORY_STAGES[f->stage&3]:
+            kind==NOTICE_TANK_MILESTONE&&bi<TMS_COUNT?TMS_NAMES[bi]:bi<MS_FISH_COUNT?MS_NAMES[bi]:"MILESTONE";
+        memmove(s_history+1,s_history,(NOTICE_HISTORY-1)*sizeof(*s_history));
+        s_history[0].habitat=t->habitat;
+        snprintf(s_history[0].title,sizeof(s_history[0].title),"%s: %s",f?f->name:"TANK",event);
+        if(s_history_n<NOTICE_HISTORY)s_history_n++;
+    }
     if (s_qn >= NOTICE_QUEUE) return;        /* a burst beyond the queue: the page still shows the rings */
     s_q[s_qn++] = (notice_t){ kind, fish, bit, 0 };
 }
 
 void notice_sync(const tank_t *t) {
+    s_history_tank=t;
     for (int i = 0; i < N_FISH_MAX; i++) { s_ms[i] = t->fish[i].ms_bits; s_stage[i] = t->fish[i].stage; }
     s_tms = t->tank_ms_bits; s_n_fish = t->n_fish;
     s_qn = 0; s_up = false; s_gap = 0; s_cue = -1;
 }
 
 void notice_tick(const tank_t *t, float dt, bool blocked) {
+    s_history_tank=t;
     if (s_n_fish < 0) { notice_sync(t); return; }
     if (t->n_fish < s_n_fish) { notice_sync(t); return; }   /* a reset: nothing to say */
     for (int i = s_n_fish; i < t->n_fish; i++) {            /* an arrival: adopt the fry quietly */

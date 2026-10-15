@@ -8,6 +8,8 @@
 #include "render.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include "notice.h"
 
 ui349_state_t g_ui349 = {.controls_hidden=true};
 static const uint8_t FONT5X7[][7] = {
@@ -95,10 +97,10 @@ void ui349_configure(ui349_state_t *s, ui349_view_t view) {
     bool changed = s->view.key != view.key;
     if (changed) s->scroll = clamp(view.initial_scroll, 0, UI349_SCROLL_MAX);
     s->view = view;
-    if (changed) { s->positioning = can_position(s); s->species_picker=false; s->habitat_picker=false; }
+    if (changed) { s->history_picker=false; s->positioning = can_position(s); s->species_picker=false; s->habitat_picker=false; }
 }
 bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
-    if(s->species_picker || s->habitat_picker || s->slots_picker
+    if(s->history_picker || s->species_picker || s->habitat_picker || s->slots_picker
 #ifdef POCKET_WORLD_PROTO
        ||s->copy_picker
 #endif
@@ -123,6 +125,9 @@ bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
 }
 /* Hit targets match the rectangles drawn below; rails never feed tank gestures. */
 static int rail_hit(const ui349_state_t *s, int x, int y) {
+    if(s->history_picker)return x>=552&&x<632&&y>=12&&y<60?UI349_HISTORY_BACK:UI349_CONSUMED;
+    if(s->view.key==400&&x>=8&&x<84&&y>=90&&y<110)return UI349_HISTORY;
+
 #ifdef POCKET_WORLD_PROTO
     if(s->copy_picker){
         if(x>=552&&x<632&&y>=12&&y<60)return UI349_COPY_BACK;
@@ -202,7 +207,16 @@ int ui349_input(ui349_state_t *s, bool down, int x, int y, bool *content_down, i
     if (down && !s->owner) {
         s->owner = rail_hit(s,x,y) != UI349_CONSUMED ? 2 : ui349_map(s, x, y, tx, ty) ? 1 : 2;
         s->pressed = rail_hit(s, x, y); s->press_key = s->view.key;
-        s->press_x=x; s->press_y=y; s->rail_moved=false;
+        s->press_x=x; s->press_y=y; s->press_scroll=s->scroll; s->rail_moved=false;
+    }
+    /* A menu drag owns its whole contact, including release. The adapter
+     * cancels its pending tap as soon as this owner is acquired. */
+    bool scrollable=s->view.key==300 || s->view.key==400 || s->view.key>=2000;
+    if(s->owner==1 && down && scrollable && abs(y-s->press_y)>12)s->owner=3;
+    if(s->owner==3){
+        if(down)s->scroll=clamp(s->press_scroll+s->press_y-y,0,UI349_SCROLL_MAX);
+        else s->owner=0;
+        return UI349_CONSUMED;
     }
     if (s->owner == 2) {
         if (down) {
@@ -251,7 +265,20 @@ static void button(uint16_t *fb, int x, int y, int w, int h, const char *label, 
     int tw = (int)strlen(label)*6*scale-scale;
     text(fb,x+(w-tw)/2,y+(h-7*scale)/2,scale,enabled ? 0xf2ffff : 0x66838a,label);
 }
-void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *source, uint16_t *native) {
+static void ui349_render_body(const ui349_state_t *s, const tank_t *t, const uint16_t *source, uint16_t *native) {
+    if(s->history_picker){
+        rect(native,0,0,UI349_W,UI349_H,0x0b2029);
+        text(native,104,8,2,0xf2ffff,"RECENT EVENTS");
+        text(native,104,29,1,0xa9e2dd,"THIS SESSION / NEWEST FIRST");
+        for(int i=0;i<notice_history_count();i++){
+            const notice_history_t *h=notice_history_get(i);char row[72];
+            snprintf(row,sizeof row,"%s / %.48s",HABITAT_NAMES[h->habitat<HABITAT_COUNT?h->habitat:0],h->title);
+            text(native,104,47+i*17,1,0xa9e2dd,row);
+        }
+        if(!notice_history_count())text(native,104,65,1,0xa9e2dd,"NEW EVENTS WILL APPEAR HERE");
+        button(native,552,12,80,48,"BACK",2,true);return;
+    }
+
 #ifdef POCKET_WORLD_PROTO
     if(s->copy_picker){
         rect(native,0,0,UI349_W,UI349_H,0x0b2029);char label[70];int item=s->copy_item;
@@ -259,7 +286,7 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
         if(s->copy_error)snprintf(label,sizeof label,"NOT ENOUGH CREDIT OR SPACE");else snprintf(label,sizeof label,"%d CREDITS   %d PLACED",(int)t->sd_balance,wp_quantity(t,&t->world,item));text(native,104,35,1,0xa9e2dd,label);
         button(native,552,12,80,48,"BACK",2,true);button(native,104,60,76,44,"PREV",2,true);button(native,456,60,76,44,"NEXT",2,true);
         snprintf(label,sizeof label,"ADD / %d",item==WP_AIRSTONE?40:SD_ITEMS[item].price);button(native,196,60,244,44,label,2,true);
-        if(s->copy_selected>=2){button(native,104,116,132,44,"MOVE",2,true);button(native,248,116,132,44,s->copy_depth==0?"BACK":s->copy_depth==1?"MIDDLE":"FRONT",2,true);button(native,392,116,132,44,"SELL",2,true);}
+        if(s->copy_selected>=2){button(native,104,116,132,44,"MOVE",2,true);button(native,248,116,132,44,s->copy_depth==0?"BACK":s->copy_depth==1?"MIDDLE":"FRONT",2,true);button(native,392,116,132,44,s->copy_sell_armed?"CONFIRM?":"SELL",2,true);}
         else text(native,104,128,1,0xa9e2dd,s->copy_error?"NOT ENOUGH CREDIT OR SPACE":"HOLD A PLACED COPY TO EDIT IT");
         return;
     }
@@ -318,7 +345,7 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
     if (!ui349_world_view(s)) {
         for (int y=0; y<UI349_H; y++)
             memcpy(native+y*UI349_W+UI349_PAGE_X,source+(y+s->scroll)*TANK_W,(fish_view(s) ? FISH_VIEW_X-UI349_PAGE_X : TANK_UI_W)*sizeof(uint16_t));
-        if(s->view.key==400)button(native,8,6,76,28,"TANKS",2,true);
+        if(s->view.key==400){button(native,8,6,76,28,"TANKS",2,true);button(native,8,90,76,20,"HISTORY",1,true);}
         else text(native,6,10,2,0xa9e2dd,s->view.title);
         button(native,8,40,76,48,"UP",3,s->scroll>0);
         button(native,8,112,76,48,"DOWN",3,s->scroll<UI349_SCROLL_MAX);
@@ -410,4 +437,10 @@ void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *sourc
         button(native,440,118,184,42,"SHOP",3,true);
 #endif
     }
+}
+
+void ui349_message(const char *message){snprintf(g_ui349.feedback,sizeof g_ui349.feedback,"%s",message);g_ui349.feedback_s=3;}
+void ui349_render(const ui349_state_t *s,const tank_t *t,const uint16_t *source,uint16_t *native){
+    ui349_render_body(s,t,source,native);
+    if(s->feedback_s>0){rect(native,168,148,304,22,0x04141a);text(native,180,155,1,0xf2ffff,s->feedback);}
 }

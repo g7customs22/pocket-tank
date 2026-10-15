@@ -32,6 +32,10 @@ typedef struct { int kind; int fish; uint32_t bit; float age; } notice_t;
 #define NOTICE_GAP_S  1.0f
 #define NOTICE_QUEUE  8
 
+#define NOTICE_HISTORY 6
+typedef struct { char title[64]; uint8_t habitat; } notice_history_t;
+int notice_history_count(void);
+const notice_history_t *notice_history_get(int newest_index);
 void notice_sync(const tank_t *t);
 void notice_tick(const tank_t *t, float dt, bool blocked);
 const notice_t *notice_current(void);      /* NULL = none up */

@@ -737,8 +737,9 @@ static void snail_tick(tank_t *t, float dt) {
             float step = fminf(d, SNAIL_PX_S * dt);
             t->snail_x += cosf(t->snail_heading) * step; t->snail_y += sinf(t->snail_heading) * step;
         } else {                                            /* grazing: the film thins under it */
-            t->snail_graze += dt;
-            int v = t->algae[t->snail_cell] - (int)(SNAIL_GRAZE_PER_S * dt + 0.5f);
+            float before=t->snail_graze;t->snail_graze+=dt;
+            int eaten=(int)(t->snail_graze*SNAIL_GRAZE_PER_S)-(int)(before*SNAIL_GRAZE_PER_S);
+            int v = t->algae[t->snail_cell] - eaten;
             t->algae[t->snail_cell] = (uint8_t)(v < 0 ? 0 : v);
             if (v <= 0) t->snail_grazed++;                  /* a cell eaten clean: its card's tally */
         }
@@ -1835,10 +1836,21 @@ bool tank_set_species(tank_t *t,int fish,int species) {
  * Food, danger, keeper interactions and courtship always release them. */
 static void pleco_glass(tank_t *t,int idx,float dt,float old_x,float old_y) {
     fish_t *f=&t->fish[idx];
-    f->glass_attached=(f->species==SPECIES_PLECO||f->species==SPECIES_BRISTLE) && f->hunger<7 && !t->hold_active &&
+    f->glass_attached=(f->species==SPECIES_PLECO||f->species==SPECIES_BRISTLE||f->species==SPECIES_BLENNY) && (t->habitat==HABITAT_CLASSIC || (t->habitat==HABITAT_REEF)==(f->species==SPECIES_BLENNY)) && f->hunger<7 && !t->hold_active &&
         !t->startled && !t->spawning && t->stage_fish!=idx &&
         f->goal.id!=GOAL_SEEK_FOOD && f->goal.id!=GOAL_FLEE_SHADOW &&
         fmodf(t->clock+idx*13.0f,40.0f)<16.0f;
+    if(f->species==SPECIES_OCTOPUS && !t->hold_active && !t->startled && !t->spawning &&
+       f->goal.id!=GOAL_SEEK_FOOD && f->hunger<7){
+        /* A peaceful game animal: shelter visits never target other residents. */
+        float cave=(t->sd_unlocks&SD_ITEM_CASTLE)?tank_decor_x(t,2):TANK_W*.5f;
+        float phase=fmodf(t->clock+idx*7,60);
+        float x=phase<22?cave:cave+sinf((phase-22)*.12f)*120;
+        float y=phase<22?TANK_H-52:TANK_H-78+sinf(phase*.2f)*22;
+        float d=fmaxf(1,tank_dist(old_x,old_y,x,y)), step=fminf(d,12*dt);
+        f->x=clampf(old_x+(x-old_x)*step/d,38,TANK_W-38);
+        f->y=clampf(old_y+(y-old_y)*step/d,38,TANK_H-38);
+    }
     if(!f->glass_attached) { f->glass_graze=0; return; }
     int cell=-1; float best=1e9f;
     for(int i=0;i<ALGAE_CELLS;i++) if(t->algae[i]) {
@@ -2028,7 +2040,7 @@ bool tank_item_allowed(int habitat,int item) {
     if(item<0||item>=SD_ITEM_COUNT)return false;
     if(habitat==HABITAT_CLASSIC||item>=UV_DECOR_FIRST)return true;
     bool marine=item==3||item==4||item>=18;
-    bool shared=item==2||item==5||(item>=6&&item<=8);
+    bool shared=item==1||item==2||item==5||(item>=6&&item<=8);
     return shared || (habitat==HABITAT_REEF?marine:!marine);
 }
 void tank_habitat_defaults(tank_t *t,int habitat) {

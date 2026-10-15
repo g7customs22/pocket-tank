@@ -605,7 +605,7 @@ static const char *const TIP_GRASS[]  = { "GRASS REGROWS ON ITS OWN,", "FASTEST 
 static const char *const TIP_GLASS[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };   /* Strato's words */
 const char *const *progression_fry_tip(int kind) {
 #ifdef POCKET_TANK_WIDE_V1
-    static const char *const care[]={"MATCHING ADULTS NEED:","HUNGER 4 OR LESS,", "ENERGY 4 OR MORE,", "STRESS 3 OR LESS.","KEEP COVER. LAPSES PAUSE.","HUNGER 8.5+ / STRESS 7.5+:","AFTER 5 MIN, LOSE 1 SEC", "PER 5 SEC UNTIL RECOVERY.",NULL};
+    static const char *const care[]={"HUNGER 4- / ENERGY 4+", "STRESS 3 OR LESS.","KEEP COVER. LAPSES PAUSE.","NEW PAIR RESETS CARE.","HUNGER 8.5+ / STRESS 7.5+:","AFTER 5 MIN, LOSE 1 SEC", "PER 5 SEC UNTIL RECOVERY.",NULL};
     static const char *const rest[]={"AFTER A FRY, WAIT SIX", "HOURS IN THIS ACTIVE TANK.","OTHER TANKS AND OFFLINE", "TIME DO NOT COUNT.",NULL};
     if(kind==FRY_REQ_GROW)return care;
     if(kind==FRY_REQ_FEED)return rest;
@@ -689,7 +689,7 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
     int care_minutes=(int)s_breed_ready/60;
     if(care_minutes<0)care_minutes=0;
     if(care_minutes>15)care_minutes=15;
-    snprintf(out[0].progress,sizeof out[0].progress,"%d / 15 MIN%s",care_minutes,
+    snprintf(out[0].progress,sizeof out[0].progress,"%d:%02d / 15 MIN%s",care_minutes,(int)s_breed_ready%60,
              pair&&s_breed_cool<=0&&out[1].met?"":s_breed_bad>=BREED_NEGLECT_GRACE_S?" - DECAY":" - PAUSED");
     if(out[1].met) snprintf(out[1].progress,sizeof out[1].progress,"A NURSERY BED IS READY");
     else snprintf(out[1].progress,sizeof out[1].progress,"TALLEST BED %d%% THERE",(int)(out[1].frac*100+0.5f));

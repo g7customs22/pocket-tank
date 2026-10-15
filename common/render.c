@@ -249,7 +249,22 @@ static float yaw_at(float yh, float yt, float lx) {
  * same 2 x 5 px marks), the preview's size so they read on a big fish */
 static void draw_species_fish(ctx_t *c,const fish_t *f,float clock,bool asleep) {
     int spc=f->species; float z=f->size;
-    if((spc==SPECIES_PLECO||spc==SPECIES_BRISTLE) && f->glass_attached) {
+    if(spc==SPECIES_OCTOPUS){
+        float phase=asleep?0:clock*1.5f+f->wander;
+        for(int arm=0;arm<8;arm++)for(int k=0;k<9;k++){
+            float spread=(arm-3.5f)*2.5f, q=k/8.f;
+            float x=f->x+(spread*(.5f+q)+sinf(phase+arm*.8f+q*3)*q*3)*z;
+            float y=f->y+(6+q*18+sinf(phase+arm)*q*2)*z;
+            fill_ellipse(c,x,y,(2.5f-q)*z,2*z,arm&1?0xa96c8a:0xc78b9d,255);
+        }
+        fill_ellipse(c,f->x,f->y-4*z,12*z,16*z,0xc78b9d,255);
+        for(int side=-1;side<=1;side+=2){
+            fill_ellipse(c,f->x+side*5*z,f->y+2*z,3*z,(asleep?1:3)*z,0xf3ddbd,255);
+            if(!asleep)fill_ellipse(c,f->x+side*5*z,f->y+2*z,1.2f*z,2*z,0x20283d,255);
+        }
+        return;
+    }
+    if((spc==SPECIES_PLECO||spc==SPECIES_BRISTLE||spc==SPECIES_BLENNY) && f->glass_attached) {
         fill_ellipse(c,f->x,f->y,10*z,23*z,0x796b47,255);
         float xs[3]={f->x-5*z,f->x-22*z,f->x-9*z}, ys[3]={f->y-9*z,f->y+7*z,f->y+14*z};
         fill_poly(c,xs,ys,3,0x9b885a);
@@ -268,9 +283,9 @@ static void draw_species_fish(ctx_t *c,const fish_t *f,float clock,bool asleep) 
     float height=spc==SPECIES_ANGEL?22:spc==SPECIES_SUNFISH?15:spc==SPECIES_PLECO?7:11;
     uint32_t body=spc==SPECIES_ANGEL?0xd8d4ac:spc==SPECIES_CLOWN?0xee861e:spc==SPECIES_TIGER_BARB?0xd3b253:spc==SPECIES_SUNFISH?0x789452:0x6e6842;
     uint32_t fin=spc==SPECIES_CLOWN?0xdf6519:spc==SPECIES_TIGER_BARB?0xd87735:spc==SPECIES_SUNFISH?0xbfa14d:0x9c9869;
-    static const float heights[]={6,7,6,15,19,9,14,6,11,13,5,8,8,7};
-    static const float lengths[]={17,14,20,20,17,18,16,23,17,17,24,21,17,19};
-    static const uint32_t bodies[]={0x8dcccd,0xd6b565,0xc5d5a7,0x235bde,0xf2d831,0x943dcc,0xdcd9ce,0xf8e7c9,0x52bfb0,0xced2b3,0x162d37,0xd45e78,0xd3b68a,0x69543c};
+    static const float heights[]={6,7,6,15,19,9,14,6,11,13,5,8,8,7,7};
+    static const float lengths[]={17,14,20,20,17,18,16,23,17,17,24,21,17,19,21};
+    static const uint32_t bodies[]={0x8dcccd,0xd6b565,0xc5d5a7,0x235bde,0xf2d831,0x943dcc,0xdcd9ce,0xf8e7c9,0x52bfb0,0xced2b3,0x162d37,0xd45e78,0xd3b68a,0x69543c,0x9c9a68};
     float length=18;
     if(spc>=SPECIES_NEON){int n=spc-SPECIES_NEON;height=heights[n];length=lengths[n];body=bodies[n];fin=body;}
     if(f->hunger>7) body=mix(body,0x8b9390,(f->hunger-7)*.1f);
@@ -329,7 +344,7 @@ static void draw_species_fish(ctx_t *c,const fish_t *f,float clock,bool asleep) 
         for(int xx=-21;xx<0;xx++)fill_ellipse(c,SX(xx,0),SY(xx,0),1*z,height*z*.75f,0xd34943,255);
     } else if(spc==SPECIES_GUPPY){
         for(int yy=-13;yy<=13;yy+=5)fill_ellipse(c,SX(-24,yy),SY(-24,yy),2*z,2*z,0x294577,255);
-    } else if(spc==SPECIES_CORY||spc==SPECIES_BRISTLE){
+    } else if(spc==SPECIES_CORY||spc==SPECIES_BRISTLE||spc==SPECIES_BLENNY){
         for(int xx=-12;xx<13;xx+=6)for(int yy=-3;yy<=3;yy+=6)fill_ellipse(c,SX(xx,yy),SY(xx,yy),1.8f*z,1.4f*z,0x3b3b2e,255);
         for(int k=0;k<(spc==SPECIES_CORY?2:5);k++)for(int h=0;h<6;h++)fill_ellipse(c,SX(15+h,k*2-3+h*.35f),SY(15+h,k*2-3+h*.35f),.7f*z,.7f*z,0xc6b087,255);
     }
@@ -640,11 +655,11 @@ static void draw_veg_impl(ctx_t *c, const tank_t *t, int b, int seed, int layer,
         int segs = tank_veg_frond(t, b, i, &bx);
         if (segs < 1) segs = 1;                    /* nubs: always a bit of green */
         if (segs > VEG_MAX_SEGS) segs = VEG_MAX_SEGS;
-        float sway = fast_sin(t->clock * (sword ? 0.6f : 0.9f) + (i + seed) * 1.7f) * amp;
+        float sway = fast_sin((t->night?0:t->clock) * (sword ? 0.6f : 0.9f) + (i + seed) * 1.7f) * amp;
         /* the swaying chain of segment centres (the frond's spine) */
         float xs[VEG_MAX_SEGS + 1];
         for (int seg = 0; seg <= segs; seg++)
-            xs[seg] = bx + sway * seg / (float)segs * fast_sin(seg * 0.4f + t->clock * 0.6f + i + seed);
+            xs[seg] = bx + sway * seg / (float)segs * fast_sin(seg * 0.4f + (t->night?0:t->clock) * 0.6f + i + seed);
         /* one span per pixel row, centred on the spine, half-width tapering
          * toward the tip: the same silhouette the old chain of overlapping
          * ellipses drew (their union was a 5 px ribbon), at ~a quarter fewer
@@ -1359,7 +1374,7 @@ static int snail_glass_tone(float lx, float ly, float sx, float sy, float clock)
 static inline void snail_put(ctx_t *c, int x, int y, int tone, float tint) {
     if (tone == SN_NONE || !CTX_IN(c, x, y)) return;
     uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
-    px_blend(c, x, y, mix(w, SNAIL_RGB[tone], tint), 255);
+    px_blend(c, x, y, mix(w, g_habitat==HABITAT_REEF?mix(SNAIL_RGB[tone],0xd4cfb0,.35f):SNAIL_RGB[tone], tint), 255);
 }
 /* UPRIGHT on the floor - a side view, mirrored to face the way it walks,
  * drawn in the scene with the fish (vignetted, behind the front fronds) -
@@ -3259,7 +3274,8 @@ static int shop_count(const tank_t *t){int n=0;while(shop_item(t,n)>=0)n++;retur
 #define SHP_ARROW_X0 (SHP_ARROW_X1 - SHP_ARROW_W - 8)     /* previous */
 static const sd_item_t *shop_info(const tank_t *t,int item){
     static const sd_item_t marine={SD_ITEM_SHRIMP,"CLEANER SHRIMP","SCARLET AND WHITE STRIPES","IN GAME: SCAVENGE FOOD SCRAPS",SD_PRICE_SHRIMP};
-    return item==5&&t->habitat==HABITAT_REEF?&marine:&SD_ITEMS[item];
+    static const sd_item_t salt_snail={SD_ITEM_SNAIL,"TURBO SNAIL","SALTWATER GLASS GRAZER","CLEARS ALGAE AS IT CRAWLS",SD_PRICE_SNAIL};
+    return item==1&&t->habitat==HABITAT_REEF?&salt_snail:item==5&&t->habitat==HABITAT_REEF?&marine:&SD_ITEMS[item];
 }
 static int g_shp_page;
 static void shop_arrow(ctx_t *c, int x, int y, bool right, uint32_t rgb) {   /* a chevron in a button */
@@ -3345,7 +3361,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         char line[32]; snprintf(line, sizeof line, "%d", it->price);
         int pw = 20 + text_w(line, 2);
         price_tag(&c, X + (W - pw) / 2, Y + 164, it->price, can ? 0xffffff : MSP_DIM);
-        if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance);
+        if (!can) { snprintf(line, sizeof line, "NEED %d MORE", (int)(it->price-t->sd_balance));
                     draw_text(&c, X + (W - text_w(line, 2)) / 2, Y + 184, 2, MSP_DIM, line); }
         if (can) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
                    draw_text(&c, bx + (MSP_HOW_W - text_w("UNLOCK", 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
@@ -3449,19 +3465,20 @@ void render_sd_toast_native(const tank_t *t,uint16_t *fb,int stride){render_sd_t
 #define SET_AFTER_Y   (SET_NUM_Y + (SET_NUM_H - 14) / 2)
 #define SET_STEP_PX   15              /* drag travel per step */
 #define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROW3_Y) + SET_SEG_H + 8)   /* the segments' band stops just under them */
-static const char *const SET_BRIGHT[3] = { "30%", "60%", "100%" };
-static const int         SET_BRIGHT_PCT[3] = { 30, 60, 100 };
+static const char *const SET_BRIGHT[5] = { "5%", "10%", "30%", "60%", "100%" };
+static const int         SET_BRIGHT_PCT[5] = { 5, 10, 30, 60, 100 };
 static const char *const SET_VOLUME[3] = { "OFF", "QUIET", "NORMAL" };
 static const char *const SET_LIGHT[2]  = { "MANUAL", "AUTO" };   /* the default first */
 
 static void set_row(ctx_t *c, int row_y, const char *label, const char *const names[], int n, int chosen) {
     draw_text(c, SET_LABEL_X, row_y, 2, MSP_TEAL, label);
+    int w=n==5?44:SET_SEG_W, dx=n==5?49:SET_SEG_DX, scale=n==5?1:2;
     for (int i = 0; i < n; i++) {
-        int x = SET_SEG_X + i * SET_SEG_DX, y = SET_SEG_Y(row_y);
+        int x = SET_SEG_X + i * dx, y = SET_SEG_Y(row_y);
         if (i == chosen) {                       /* lit: teal, ink lettering */
-            button(c, x, y, SET_SEG_W, SET_SEG_H, MSP_TEAL, MSP_TEAL, names[i], 2);
-            draw_text(c, x + (SET_SEG_W - text_w(names[i], 2)) / 2, y + (SET_SEG_H - 14) / 2, 2, MSP_INK, names[i]);
-        } else button(c, x, y, SET_SEG_W, SET_SEG_H, 0x1c2f36, MSP_DIM, names[i], 2);
+            button(c, x, y, w, SET_SEG_H, MSP_TEAL, MSP_TEAL, names[i], scale);
+            draw_text(c, x + (w - text_w(names[i], scale)) / 2, y + (SET_SEG_H - 7*scale) / 2, scale, MSP_INK, names[i]);
+        } else button(c, x, y, w, SET_SEG_H, 0x1c2f36, MSP_DIM, names[i], scale);
     }
 }
 static void set_chevron(ctx_t *c, int cx, int y, bool up, uint32_t rgb) {   /* the setup's, a size down */
@@ -3475,8 +3492,8 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     ctx_t c = ctx_full(fb, stride, 1.0f);
     rect_fill(&c, 0, 0, TANK_UI_W, TANK_H, MSP_INK);
     draw_text(&c, (TANK_UI_W - text_w("SETTINGS", 3)) / 2, SET_TITLE_Y, 3, 0xffffff, "SETTINGS");
-    int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
-    set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
+    int bi=0; while(bi<4 && bright_pct>SET_BRIGHT_PCT[bi])bi++;
+    set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 5, bi);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
     draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2,
 #ifdef POCKET_TANK_WIDE_V1
@@ -3523,7 +3540,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
 }
 static int set_segment(float x, int n) {
     if (x < SET_SEG_X - 10) return -1;
-    int i = (int)((x - SET_SEG_X + 3) / SET_SEG_DX);
+    int i = (int)((x - SET_SEG_X + 3) / (n==5?49:SET_SEG_DX));
     return i < 0 ? 0 : i >= n ? n - 1 : i;
 }
 /* the hit test: what a TAP at (x,y) means. *value: BRIGHT the percent,
@@ -3536,7 +3553,7 @@ int render_settings_tap(float x, float y, int *value) {
        (fingers report low); the LIGHTS OUT band ends just under its
        segments so the number's up chevron below is its own */
     int seg = set_segment(x, 3);
-    if (y >= SET_SEG_Y(SET_ROW1_Y) - 12 && y < SET_SEG_Y(SET_ROW2_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = SET_BRIGHT_PCT[seg]; return SET_TAP_BRIGHT; }
+    if (y >= SET_SEG_Y(SET_ROW1_Y) - 12 && y < SET_SEG_Y(SET_ROW2_Y) - 12) { seg=set_segment(x,5); if (seg < 0) return SET_TAP_NONE; *value = SET_BRIGHT_PCT[seg]; return SET_TAP_BRIGHT; }
     if (y >= SET_SEG_Y(SET_ROW2_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_VOLUME; }
     if (y >= SET_SEG_Y(SET_ROW3_Y) - 12 && y < SET_LIGHT_BAND_END)          { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg == 1; return SET_TAP_LIGHT; }
     if (y >= SET_LIGHT_BAND_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {

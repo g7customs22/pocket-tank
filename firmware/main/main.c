@@ -30,6 +30,7 @@
 #include "imu_port.h"
 #include "director.h"
 #include "brightness.h"
+#include "render_cadence.h"
 #include "batlog.h"
 #include "codec_port.h"
 #include "progression.h"
@@ -267,6 +268,7 @@ static void enter_sleep_for(int wake_after_s) {
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "nap");
         s_snap_n = 0;
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        g_ui349.wake_pending=true;
         boot349_capture_enable(true); /* discard wake gesture and sleep-time edges */
 #else
         s_btn_armed = false; s_btn_low_since = 0;   /* require a fresh press */
@@ -524,6 +526,7 @@ static void tank_task(void *arg) {
     int64_t last = esp_timer_get_time(); int cur = 0;
     int64_t last_log = last;
     int64_t render_us = 0, flush_us = 0, card_us = 0; uint32_t frames = 0, card_frames = 0;
+    float sim_accum=0;
     for (;;) {
         int64_t now = esp_timer_get_time();
         float dt = (now - last) / 1e6f; last = now; if (dt > 0.25f) dt = 0.25f;
@@ -560,7 +563,7 @@ static void tank_task(void *arg) {
             g_ui349.active_slot=slot_system_active();g_ui349.slots_present=slot_system_present();
     for(unsigned i=0;i<3;i++)g_ui349.slot_fish[i]=slot_system_fish_count(i);
     g_ui349.can_undo=slot_system_has_undo();
-            last=esp_timer_get_time();dt=0;
+            last=esp_timer_get_time();dt=0;sim_accum=0;
         }
 #endif
         director_poll(&tank);
@@ -579,6 +582,9 @@ static void tank_task(void *arg) {
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
               int item = r - SHOP_TAP_SELL;
               if (progression_sell(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+                  ui349_message("SOLD / CREDIT RETURNED");
+#endif
                   ESP_LOGI(TAG, "shop: %s sold back for %d, balance %d", SD_ITEMS[item].name, progression_sell_value(item), (int)tank.sd_balance); }
           } else if (r >= SHOP_TAP_MOVE) {                              /* a piece already in the tank: place it again */
               int item = r - SHOP_TAP_MOVE;
@@ -587,6 +593,9 @@ static void tank_task(void *arg) {
           } else if (r >= SHOP_TAP_BUY) {
               int item = r - SHOP_TAP_BUY;
               if (progression_buy(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+                  ui349_message("PURCHASED");
+#endif
                   ESP_LOGI(TAG, "shop: %s unlocked, %d sand dollars left", SD_ITEMS[item].name, (int)tank.sd_balance);
                   if (tank_decor_placeable(item)) {                     /* a placeable piece: the page opens over the live tank */
                       touch_port_show_shop(false); setup_begin_place(&tank, item);
@@ -595,6 +604,9 @@ static void tank_task(void *arg) {
         brightness_apply(tank.night);
         { static int64_t last_bat; if (now - last_bat > 5LL * 60 * 1000000) {   /* battery log: awake sample every 5 min */
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        if(g_ui349.feedback_s>0)g_ui349.feedback_s-=dt;
+#endif
         tank.hold_light = setup_active() || touch_port_confirm_up();   /* no lights-out mid-name */
         tank.ui_cover = tank.hold_light || touch_port_milestones() || touch_port_settings() || touch_port_shop() || touch_port_battery();   /* a fry's spawning waits */
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
@@ -607,12 +619,20 @@ static void tank_task(void *arg) {
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
         touch_port_poll(&tank);
 #endif
+        /* Fixed simulation steps keep care/growth/grazing independent of how
+         * often the display is redrawn. Catch up normal render stalls. */
+        sim_accum+=dt;
+        bool held=tank.hold_active;
+        while(sim_accum>=1.0f/30.0f){
+            tank.hold_active=held;
 #ifdef POCKET_WORLD_PROTO
-        wp_tick(&tank,&tank.world,dt,llm_ok?advisor_llm_esp:advisor_rules);
+            wp_tick(&tank,&tank.world,1.0f/30.0f,llm_ok?advisor_llm_esp:advisor_rules);
 #else
-        tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
+            tank_tick(&tank,1.0f/30.0f,llm_ok?advisor_llm_esp:advisor_rules);
 #endif
-        progression_tick(&tank, dt);
+            progression_tick(&tank,1.0f/30.0f);
+            sim_accum-=1.0f/30.0f;
+        }
         battery_frame(now);
         notice_tick(&tank, dt, tank.ui_cover || setup_birth_due());   /* a fry's welcome first (2026-09-29) */
         { int cue = notice_take_cue(); if (cue >= 0) audio_port_play(cue, AUDIO_PITCH_ONE); }
@@ -629,7 +649,14 @@ static void tank_task(void *arg) {
             if (nb >= 0) { touch_port_dismiss(); audio_port_play(SND_ARRIVAL, AUDIO_PITCH_ONE);
                            ESP_LOGI(TAG, "a new fry, %s: birth flow up (announce, name, family; director `setup off` drops it)", tank.fish[nb].name); }
         }
-        if (fb[cur]) {
+        static int64_t last_draw;
+        bool render_active=true;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        render_active=g_ui349.owner || now-g_ui349.last_interaction_us<2000000 || imu_port_moving() ||
+            setup_active() || tank.ui_cover || touch_port_selected()>=0 || notice_current();
+#endif
+        if (fb[cur] && render_due(now,last_draw,render_active,tank.night)) {
+            last_draw=now;
             if (s_prefetch_pending) {                       /* prior frame's scene prefetch */
                 xSemaphoreTake(s_amc_done, portMAX_DELAY);
                 s_prefetch_pending = false;

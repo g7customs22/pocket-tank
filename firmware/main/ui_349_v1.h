@@ -44,17 +44,22 @@ static inline void ui349_battery_update(ui349_battery_t *b,int mv) {
 typedef struct {
 #ifdef POCKET_WORLD_PROTO
     wp_camera_t world_camera;
-    bool world_ready,copy_picker,copy_placing,copy_error;
+    bool world_ready,copy_picker,copy_placing,copy_error,copy_sell_armed;
     int copy_item,copy_selected,copy_depth;
     int center_result; /* 0 instruction, 1 success, -1 invalid/stale sample */
 #endif
     ui349_battery_t battery;
     ui349_view_t view;
     int camera_x, camera_y;
+    int press_scroll;
+    int64_t last_interaction_us;
+    bool wake_contact, wake_pending;
     int scroll, owner, pressed, press_key, last_x, last_y, press_x, press_y;
     bool positioning, rail_moved, species_picker, habitat_picker;
     bool controls_hidden; /* presentation only; clean aquarium has no control hitboxes */
     int habitat, species_page;
+    char feedback[48]; float feedback_s;
+    bool history_picker;
     bool slots_picker, slot_error, can_undo;
     unsigned feed_notice_s; int slot_fish[3];
     unsigned active_slot, slots_present;
@@ -73,6 +78,13 @@ static inline bool ui349_toggle_zoom(ui349_state_t*s){
     s->center_result=0;return true;
 }
 #endif
+/* Consume the entire first contact after a wake, including its release. */
+static inline bool ui349_wake_filter(ui349_state_t *s,bool down,bool auto_asleep){
+    if(down&&(s->wake_pending||auto_asleep)){s->wake_pending=false;s->wake_contact=true;}
+    if(!s->wake_contact)return false;
+    if(!down)s->wake_contact=false;
+    return true;
+}
 /* First-sample presses. Short contacts need a prompt release so two taps do
  * not become one hold. Established holds/drags retain the 50 ms dropout bridge. */
 typedef struct {
@@ -101,7 +113,7 @@ enum { UI349_COPIES=400,UI349_COPY_BACK,UI349_COPY_PREV,UI349_COPY_NEXT,UI349_CO
 static inline bool ui349_feed_zone(float screen_y, bool drag) {
     return screen_y >= 0 && screen_y < (drag ? 38 : 30);
 }
-enum { UI349_CENTER_VIEW=420,UI349_ZOOM };
+enum { UI349_CENTER_VIEW=420,UI349_ZOOM,UI349_HISTORY,UI349_HISTORY_BACK };
 enum { UI349_PASS, UI349_CONSUMED, UI349_MENU, UI349_SETTINGS, UI349_SHOP, UI349_CLOSE, UI349_NEXT, UI349_SPECIES, UI349_SPECIES_BACK, UI349_HABITAT=20, UI349_HABITAT_BACK, UI349_TANKS, UI349_TANKS_BACK, UI349_TANK_STYLE, UI349_SPECIES_PREV, UI349_SPECIES_NEXT, UI349_UNDO, UI349_SLOT_PICK=300, UI349_SPECIES_PICK=100, UI349_HABITAT_PICK=200 };
 /* Active tank taps are consumed by the rail, but never dispatch a switch. */
 static inline int ui349_slot_request(const ui349_state_t *s,int action){
@@ -122,6 +134,7 @@ bool ui349_world_view(const ui349_state_t *s);
 void ui349_configure(ui349_state_t *s, ui349_view_t view);
 bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty);
 int ui349_input(ui349_state_t *s, bool down, int x, int y, bool *content_down, int *tx, int *ty);
+void ui349_message(const char *message);
 void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *source, uint16_t *native);
 /* Firmware-owned state, also used by the touch adapter. */
 extern ui349_state_t g_ui349;

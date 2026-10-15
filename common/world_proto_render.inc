@@ -23,7 +23,7 @@ static void wp_draw_item(ctx_t *c,const tank_t *t,int item,float x,float scale,u
   fill_ellipse(c,x+10*scale,TANK_H-42*scale,9*scale,10*scale,0x65a58e,45);
   c->dim=dim;g_uv_material=old;
  }
- if(item>=EXTRA_DECOR_FIRST)draw_extra(c,item,x,TANK_H-14,t->clock+id*2.713f,scale,true);
+ if(item>=EXTRA_DECOR_FIRST)draw_extra(c,item,x,TANK_H-14,(t->night?0:t->clock)+id*2.713f,scale,true);
  if(item==7&&t->night){bool old=g_uv_material;g_uv_material=false;float dim=c->dim;c->dim=1;
   fill_ellipse(c,x-9*scale,TANK_H-14-29*scale,5*scale,6*scale,0x76b99b,170);
   fill_ellipse(c,x+10*scale,TANK_H-14-28*scale,5*scale,6*scale,0x76b99b,170);
@@ -53,7 +53,7 @@ static void render_world_view(const tank_t *t,const wp_objects_t *o,const wp_cam
   for(int i=0;i<WP_COPIES;i++){const wp_copy_t *p=&o->saved.copy[i];if(p->id&&p->depth==d)wp_draw_item(c,t,p->item,p->x,d==2?1.12f:1.f,p->id);}
   if(d==1){
    wp_source_t src[WP_SOURCES];int n=wp_sources(t,o,src);
-   for(int k=0;k<MAX_BUBBLE;k++){int i=k%n;bool chest=src[i].id==1;for(int j=0;j<WP_COPIES;j++)if(o->saved.copy[j].id==src[i].id&&o->saved.copy[j].item==8)chest=true;if(chest)continue;float yy=TANK_H-23-fmodf(t->clock*(20+k%7)+k*47,TANK_H-30);float xx=src[i].x+sinf(t->clock+k)*6;
+   for(int k=0;!t->night&&k<MAX_BUBBLE;k++){int i=k%n;bool chest=src[i].id==1;for(int j=0;j<WP_COPIES;j++)if(o->saved.copy[j].id==src[i].id&&o->saved.copy[j].item==8)chest=true;if(chest)continue;float yy=TANK_H-23-fmodf(t->clock*(20+k%7)+k*47,TANK_H-30);float xx=src[i].x+sinf(t->clock+k)*6;
     fill_ellipse(c,xx,yy,1.5f+k%2,2,uv?0x958cee:0x8acbd7,110);}
    for(int i=0;i<MAX_FOOD;i++)if(t->food[i].alive){fill_ellipse(c,t->food[i].x,t->food[i].y,2.6f,2.6f,0xffbd59,255);}
    draw_snail(c,t,true);

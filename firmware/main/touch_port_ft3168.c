@@ -139,6 +139,11 @@ void touch_port_poll(tank_t *t) {
     }
     if(touch_err!=ESP_OK)return;
     ui349_contact(&contact, now, &touched, &raw_x, &raw_y);
+    if(touched)g_ui349.last_interaction_us=now;
+    /* Automatic lights-out: the first whole contact only wakes the tank. */
+    if(ui349_wake_filter(&g_ui349,touched,!g_ui349.owner&&!s_down&&t->night&&t->light_auto)){
+        tank_handled(t);s_down=false;return;
+    }
     int mapped_x, mapped_y;
     int ux = raw_x, uy = raw_y;
     if (s_inverted) { ux = UI349_W - 1 - ux; uy = UI349_H - 1 - uy; }
@@ -147,8 +152,12 @@ void touch_port_poll(tank_t *t) {
     #endif
     int action = ui349_input(&g_ui349, touched, ux, uy, &touched, &mapped_x, &mapped_y);
     if (action != UI349_PASS) {
+        s_down=false; /* captured rails/scrolls must never release as content taps */
         if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
 #ifdef POCKET_WORLD_PROTO
+        if(action==UI349_HISTORY){g_ui349.history_picker=true;return;}
+        if(action==UI349_HISTORY_BACK){g_ui349.history_picker=false;return;}
+        if(g_ui349.history_picker)return;
         if(action==UI349_ZOOM){ui349_toggle_zoom(&g_ui349);return;}
         if(action==UI349_CENTER_VIEW){
             int16_t a[3];int64_t stamp=0;
@@ -158,13 +167,14 @@ void touch_port_poll(tank_t *t) {
         }
         if(action>=UI349_COPIES&&action<=UI349_COPY_DONE){
             ui349_state_t *u=&g_ui349;
+            if(action!=UI349_COPY_SELL)u->copy_sell_armed=false;
             if(action==UI349_COPIES){touch_port_dismiss();notice_dismiss();u->copy_picker=true;u->copy_item=6;u->copy_selected=-1;u->copy_error=false;}
             else if(action==UI349_COPY_BACK){u->copy_picker=false;touch_port_show_shop(true);}
             else if(action==UI349_COPY_PREV||action==UI349_COPY_NEXT){int step=action==UI349_COPY_NEXT?1:-1;do{u->copy_item+=step;if(u->copy_item<6)u->copy_item=WP_AIRSTONE;if(u->copy_item>WP_AIRSTONE)u->copy_item=6;}while(u->copy_item<SD_ITEM_COUNT&&!tank_item_allowed(t->habitat,u->copy_item));u->copy_selected=-1;u->copy_error=false;}
-            else if(action==UI349_COPY_BUY){float wx,wy;wp_map(&u->world_camera,1,WP_W*.5f,WP_H*.5f,&wx,&wy);int id=wp_buy(t,&t->world,u->copy_item,wx,1);u->copy_error=id<0;if(id>=2){u->copy_selected=id;u->copy_depth=1;progression_save(t);}}
+            else if(action==UI349_COPY_BUY){float wx,wy;wp_map(&u->world_camera,1,WP_W*.5f,WP_H*.5f,&wx,&wy);int id=wp_buy(t,&t->world,u->copy_item,wx,1);u->copy_error=id<0;if(id>=2){ui349_message("PURCHASED / COPY ADDED");u->copy_selected=id;u->copy_depth=1;progression_save(t);}}
             else if(action==UI349_COPY_MOVE){u->copy_picker=false;u->copy_placing=true;touch_port_dismiss();}
             else if(action==UI349_COPY_DEPTH){for(int i=0;i<WP_COPIES;i++)if(t->world.saved.copy[i].id==u->copy_selected){wp_copy_t *p=&t->world.saved.copy[i];u->copy_depth=(p->depth+1)%3;wp_move(&t->world,p->id,p->x,u->copy_depth);progression_save(t);}}
-            else if(action==UI349_COPY_SELL){if(wp_sell(t,&t->world,u->copy_selected)){u->copy_selected=-1;progression_save(t);}}
+            else if(action==UI349_COPY_SELL){if(!u->copy_sell_armed){u->copy_sell_armed=true;return;}u->copy_sell_armed=false;if(wp_sell(t,&t->world,u->copy_selected)){ui349_message("SOLD / CREDIT RETURNED");u->copy_selected=-1;progression_save(t);}}
             else if(action==UI349_COPY_DONE){u->copy_placing=false;u->copy_picker=true;progression_save(t);}
             return;
         }
