@@ -3040,12 +3040,12 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         const int X = MSP_MODAL_X, Y = MSP_FRY_MODAL_Y, W = MSP_MODAL_W;
         const char *const *tip = progression_fry_tip(g_ms_kind);
         int n = 0; while (tip[n]) n++;
-        const int H = 56 + n * 20 + 16;
+        const int H = 40 + n * 18 + 6;
         rect_fill(&c, X, Y, W, H, 0x04141a);
         rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
         char title[24]; snprintf(title, sizeof title, "%s: HOW", g_ms_title);
-        draw_text(&c, X + (W - text_w(title, 3)) / 2, Y + 16, 3, 0xffffff, title);
-        for (int i = 0; i < n; i++) draw_text(&c, X + (W - text_w(tip[i], 2)) / 2, Y + 56 + i * 20, 2, MSP_TEAL, tip[i]);
+        draw_text(&c, X + (W - text_w(title, 2)) / 2, Y + 8, 2, 0xffffff, title);
+        for (int i = 0; i < n; i++) draw_text(&c, X + (W - text_w(tip[i], 2)) / 2, Y + 34 + i * 18, 2, MSP_TEAL, tip[i]);
     } else if (g_ms_caption[0]) {
         const int X = MSP_MODAL_X, W = MSP_MODAL_W;
         const int Y = g_ms_kind >= 0 ? MSP_FRY_MODAL_Y : MSP_MODAL_Y;
@@ -3273,7 +3273,7 @@ static int shop_count(const tank_t *t){int n=0;while(shop_item(t,n)>=0)n++;retur
 #define SHP_ARROW_X1 (TANK_UI_W - 28 - SHP_ARROW_W)          /* next */
 #define SHP_ARROW_X0 (SHP_ARROW_X1 - SHP_ARROW_W - 8)     /* previous */
 static const sd_item_t *shop_info(const tank_t *t,int item){
-    static const sd_item_t marine={SD_ITEM_SHRIMP,"CLEANER SHRIMP","SCARLET AND WHITE STRIPES","IN GAME: SCAVENGE FOOD SCRAPS",SD_PRICE_SHRIMP};
+    static const sd_item_t marine={SD_ITEM_SHRIMP,"CLEANER SHRIMP","SCARLET AND WHITE STRIPES","IN GAME: EATS FOOD SCRAPS",SD_PRICE_SHRIMP};
     static const sd_item_t salt_snail={SD_ITEM_SNAIL,"TURBO SNAIL","SALTWATER GLASS GRAZER","CLEARS ALGAE AS IT CRAWLS",SD_PRICE_SNAIL};
     return item==1&&t->habitat==HABITAT_REEF?&salt_snail:item==5&&t->habitat==HABITAT_REEF?&marine:&SD_ITEMS[item];
 }
@@ -3350,7 +3350,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     if (owned && tank_decor_placeable(g_shp_modal)) {         /* a placeable piece: MOVE re-opens the placement page, SELL (twice) sells it back */
         char sell[24]; snprintf(sell, sizeof sell, "SELLS BACK FOR %d", progression_sell_value(g_shp_modal));
         draw_text(&c, X + (W - text_w("IN THE TANK", 2)) / 2, Y + 164, 2, MSP_TEAL, "IN THE TANK");
-        draw_text(&c, X + (W - text_w(sell, 2)) / 2, Y + 184, 2, MSP_DIM, sell);
+        draw_text(&c, X + (W - text_w(sell, 2)) / 2, Y + 184, 2, MSP_TEAL, sell);
         button(&c, SHP_TWO_X0, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "MOVE", 2);
         if (g_shp_sell_armed) { snprintf(sell, sizeof sell, "+%d OK?", progression_sell_value(g_shp_modal));
                                 button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, sell, 2);
@@ -3362,7 +3362,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         int pw = 20 + text_w(line, 2);
         price_tag(&c, X + (W - pw) / 2, Y + 164, it->price, can ? 0xffffff : MSP_DIM);
         if (!can) { snprintf(line, sizeof line, "NEED %d MORE", (int)(it->price-t->sd_balance));
-                    draw_text(&c, X + (W - text_w(line, 2)) / 2, Y + 184, 2, MSP_DIM, line); }
+                    draw_text(&c, X + (W - text_w(line, 2)) / 2, Y + 184, 2, MSP_TEAL, line); }
         if (can) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
                    draw_text(&c, bx + (MSP_HOW_W - text_w("UNLOCK", 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
         else button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);

@@ -605,7 +605,7 @@ static const char *const TIP_GRASS[]  = { "GRASS REGROWS ON ITS OWN,", "FASTEST 
 static const char *const TIP_GLASS[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };   /* Strato's words */
 const char *const *progression_fry_tip(int kind) {
 #ifdef POCKET_TANK_WIDE_V1
-    static const char *const care[]={"HUNGER 4- / ENERGY 4+", "STRESS 3 OR LESS.","KEEP COVER. LAPSES PAUSE.","NEW PAIR RESETS CARE.","HUNGER 8.5+ / STRESS 7.5+:","AFTER 5 MIN, LOSE 1 SEC", "PER 5 SEC UNTIL RECOVERY.",NULL};
+    static const char *const care[]={"HUNGER 4 MAX / ENERGY 4 MIN", "STRESS 3 OR LESS.","KEEP COVER. LAPSES PAUSE.","NEW PAIR RESETS CARE.","HUNGER 8.5+ / STRESS 7.5+:","AFTER 5 MIN, LOSE 1 SEC", "PER 5 SEC UNTIL RECOVERY.",NULL};
     static const char *const rest[]={"AFTER A FRY, WAIT SIX", "HOURS IN THIS ACTIVE TANK.","OTHER TANKS AND OFFLINE", "TIME DO NOT COUNT.",NULL};
     if(kind==FRY_REQ_GROW)return care;
     if(kind==FRY_REQ_FEED)return rest;

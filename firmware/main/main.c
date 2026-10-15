@@ -31,6 +31,7 @@
 #include "director.h"
 #include "brightness.h"
 #include "render_cadence.h"
+#include "game_clock.h"
 #include "batlog.h"
 #include "codec_port.h"
 #include "progression.h"
@@ -75,6 +76,7 @@ extern const uint8_t tokenizer_bin_end[]   asm("_binary_tokenizer_bin_end");
 
 static const char *TAG = "pocket-tank";
 static tank_t tank;
+static game_clock_t s_game_clock;
 static uint16_t *fb[PLAN_FB_COUNT];
 static bool llm_ok = false;
 
@@ -200,6 +202,7 @@ static int restore_fish(void) {
     return n;
 }
 static void enter_sleep_for(int wake_after_s) {
+    game_clock_account(&s_game_clock,esp_timer_get_time());
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
     boot349_capture_enable(false);
 #endif
@@ -273,6 +276,7 @@ static void enter_sleep_for(int wake_after_s) {
 #else
         s_btn_armed = false; s_btn_low_since = 0;   /* require a fresh press */
 #endif
+        game_clock_resume(&s_game_clock,esp_timer_get_time(),s_game_clock.slot);
         ESP_LOGI(TAG, "wake within the grace: resumed in place after %.0f s", napped);
         return;
     }
@@ -526,10 +530,32 @@ static void tank_task(void *arg) {
     int64_t last = esp_timer_get_time(); int cur = 0;
     int64_t last_log = last;
     int64_t render_us = 0, flush_us = 0, card_us = 0; uint32_t frames = 0, card_frames = 0;
-    float sim_accum=0;
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    game_clock_init(&s_game_clock,last,slot_system_active());
+#else
+    game_clock_init(&s_game_clock,last,0);
+#endif
     for (;;) {
         int64_t now = esp_timer_get_time();
+        /* Presentation/camera dt only; gameplay uses the untruncated clock below. */
         float dt = (now - last) / 1e6f; last = now; if (dt > 0.25f) dt = 0.25f;
+        /* Drain awake debt before new actions can affect historical care or
+         * transfer that time to another tank. Bound work and yield per batch. */
+        game_clock_account(&s_game_clock,now);
+        static bool catchup_pending,catchup_held;
+        if(!catchup_pending)catchup_held=tank.hold_active;
+        unsigned steps=game_clock_take(&s_game_clock);
+        for(unsigned step=0;step<steps;step++){
+            tank.hold_active=catchup_held;
+#ifdef POCKET_WORLD_PROTO
+            wp_tick(&tank,&tank.world,GAME_CLOCK_STEP,llm_ok?advisor_llm_esp:advisor_rules);
+#else
+            tank_tick(&tank,GAME_CLOCK_STEP,llm_ok?advisor_llm_esp:advisor_rules);
+#endif
+            progression_tick(&tank,GAME_CLOCK_STEP);
+        }
+        catchup_pending=game_clock_due(&s_game_clock);
+        if(catchup_pending){vTaskDelay(1);continue;}
         sleep_button_poll(now);
         pwr_key_poll(now);
         imu_port_poll(now);
@@ -553,6 +579,7 @@ static void tank_task(void *arg) {
         int slot_request=touch_port_take_slot();
         if(tank_take_feed_full())g_ui349.feed_notice_s=3;
         if(slot_request>=0||slot_request==-2) {
+            game_clock_account(&s_game_clock,esp_timer_get_time());
             bool switched=!setup_active() && advisor_llm_esp_quiesce() && (slot_request==-2?slot_system_undo(&tank):slot_system_switch(&tank,(unsigned)slot_request));
             if(switched){
                 setup_cancel(&tank);touch_port_slot_changed();notice_sync(&tank);
@@ -563,7 +590,10 @@ static void tank_task(void *arg) {
             g_ui349.active_slot=slot_system_active();g_ui349.slots_present=slot_system_present();
     for(unsigned i=0;i<3;i++)g_ui349.slot_fish[i]=slot_system_fish_count(i);
     g_ui349.can_undo=slot_system_has_undo();
-            last=esp_timer_get_time();dt=0;sim_accum=0;
+            last=esp_timer_get_time();dt=0;
+            if(switched)game_clock_resume(&s_game_clock,last,slot_system_active());
+            else game_clock_account(&s_game_clock,last);
+            if(switched&&slot_request==-2)game_clock_reset_active(&s_game_clock,last);
         }
 #endif
         director_poll(&tank);
@@ -571,7 +601,7 @@ static void tank_task(void *arg) {
         touch_port_poll(&tank); /* serial/save work must not share a blind span with rendering */
 #endif
         int ans = touch_port_confirm_take();
-        if (ans > 0) reset_tank();
+        if (ans > 0) { reset_tank();game_clock_reset_active(&s_game_clock,esp_timer_get_time()); }
         else if (ans < 0) ESP_LOGI(TAG, "reset prompt: tank kept");
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */
           if (w == SET_TAP_BRIGHT) brightness_set_level(v);
@@ -619,20 +649,6 @@ static void tank_task(void *arg) {
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
         touch_port_poll(&tank);
 #endif
-        /* Fixed simulation steps keep care/growth/grazing independent of how
-         * often the display is redrawn. Catch up normal render stalls. */
-        sim_accum+=dt;
-        bool held=tank.hold_active;
-        while(sim_accum>=1.0f/30.0f){
-            tank.hold_active=held;
-#ifdef POCKET_WORLD_PROTO
-            wp_tick(&tank,&tank.world,1.0f/30.0f,llm_ok?advisor_llm_esp:advisor_rules);
-#else
-            tank_tick(&tank,1.0f/30.0f,llm_ok?advisor_llm_esp:advisor_rules);
-#endif
-            progression_tick(&tank,1.0f/30.0f);
-            sim_accum-=1.0f/30.0f;
-        }
         battery_frame(now);
         notice_tick(&tank, dt, tank.ui_cover || setup_birth_due());   /* a fry's welcome first (2026-09-29) */
         { int cue = notice_take_cue(); if (cue >= 0) audio_port_play(cue, AUDIO_PITCH_ONE); }
