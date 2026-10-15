@@ -60,6 +60,8 @@ typedef struct {
     int habitat, species_page;
     char feedback[48]; float feedback_s;
     bool history_picker;
+    bool clock_picker,clock_valid;
+    int clock_fields[6],clock_field;
     bool slots_picker, slot_error, can_undo;
     unsigned feed_notice_s; int slot_fish[3];
     unsigned active_slot, slots_present;
@@ -138,6 +140,7 @@ void ui349_message(const char *message);
 void ui349_render(const ui349_state_t *s, const tank_t *t, const uint16_t *source, uint16_t *native);
 /* Firmware-owned state, also used by the touch adapter. */
 extern ui349_state_t g_ui349;
+enum { UI349_CLOCK=600,UI349_CLOCK_CANCEL,UI349_CLOCK_SAVE,UI349_CLOCK_MINUS,UI349_CLOCK_PLUS,UI349_CLOCK_FIELD=610 };
 void ui349_capture_fish(ui349_state_t *s, const tank_t *tank, const uint16_t *source, uint16_t *native);
 void display349_view(tank_t *tank, ui349_view_t view, const uint16_t *source);
 #endif

@@ -97,10 +97,10 @@ void ui349_configure(ui349_state_t *s, ui349_view_t view) {
     bool changed = s->view.key != view.key;
     if (changed) s->scroll = clamp(view.initial_scroll, 0, UI349_SCROLL_MAX);
     s->view = view;
-    if (changed) { s->history_picker=false; s->positioning = can_position(s); s->species_picker=false; s->habitat_picker=false; }
+    if (changed) { s->history_picker=false; s->clock_picker=false; s->positioning = can_position(s); s->species_picker=false; s->habitat_picker=false; }
 }
 bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
-    if(s->history_picker || s->species_picker || s->habitat_picker || s->slots_picker
+    if(s->clock_picker || s->history_picker || s->species_picker || s->habitat_picker || s->slots_picker
 #ifdef POCKET_WORLD_PROTO
        ||s->copy_picker
 #endif
@@ -125,6 +125,13 @@ bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
 }
 /* Hit targets match the rectangles drawn below; rails never feed tank gestures. */
 static int rail_hit(const ui349_state_t *s, int x, int y) {
+    if(s->clock_picker){
+        if(x>=552&&x<632){if(y>=8&&y<60)return UI349_CLOCK_CANCEL;if(y>=110&&y<164)return UI349_CLOCK_SAVE;}
+        if(y>=42&&y<96&&x>=12&&x<540)return UI349_CLOCK_FIELD+(x-12)/88;
+        if(y>=108&&y<152){if(x>=104&&x<208)return UI349_CLOCK_MINUS;if(x>=328&&x<432)return UI349_CLOCK_PLUS;}
+        return UI349_CONSUMED;
+    }
+    if(s->view.key==200&&x>=8&&x<84&&y>=4&&y<36)return UI349_CLOCK;
     if(s->history_picker)return x>=552&&x<632&&y>=12&&y<60?UI349_HISTORY_BACK:UI349_CONSUMED;
     if(s->view.key==400&&x>=8&&x<84&&y>=90&&y<110)return UI349_HISTORY;
 
@@ -266,6 +273,20 @@ static void button(uint16_t *fb, int x, int y, int w, int h, const char *label, 
     text(fb,x+(w-tw)/2,y+(h-7*scale)/2,scale,enabled ? 0xf2ffff : 0x66838a,label);
 }
 static void ui349_render_body(const ui349_state_t *s, const tank_t *t, const uint16_t *source, uint16_t *native) {
+    if(s->clock_picker){
+        static const char *labels[]={"YEAR","MONTH","DAY","HOUR","MIN","SEC"};
+        rect(native,0,0,640,172,0x0b2029);text(native,12,8,2,0xf2ffff,"SET DATE AND TIME / UTC");
+        text(native,12,28,1,0xa9e2dd,"UTC HAS NO DAYLIGHT SAVING OFFSET");
+        for(int i=0;i<6;i++){char b[12];int x=12+i*88;
+            button(native,x,42,82,54,"",1,true);
+            text(native,x+6,48,1,0xa9e2dd,labels[i]);snprintf(b,sizeof b,"%0*d",i?2:4,s->clock_fields[i]);
+            text(native,x+6,68,2,i==s->clock_field?0xffd080:0xf2ffff,b);
+            if(i==s->clock_field)rect(native,x,94,82,3,0xffd080);
+        }
+        button(native,104,108,104,44,"-",3,true);button(native,328,108,104,44,"+",3,true);
+        button(native,552,8,80,52,"CANCEL",1,true);button(native,552,110,80,54,"SAVE",2,true);
+        text(native,12,158,1,0xa9e2dd,s->clock_valid?"TAP FIELD THEN -/+ / NO EXTRA AGING":"CLOCK UNSET / ENTER UTC THEN SAVE");return;
+    }
     if(s->history_picker){
         rect(native,0,0,UI349_W,UI349_H,0x0b2029);
         text(native,104,8,2,0xf2ffff,"RECENT EVENTS");
@@ -346,6 +367,7 @@ static void ui349_render_body(const ui349_state_t *s, const tank_t *t, const uin
         for (int y=0; y<UI349_H; y++)
             memcpy(native+y*UI349_W+UI349_PAGE_X,source+(y+s->scroll)*TANK_W,(fish_view(s) ? FISH_VIEW_X-UI349_PAGE_X : TANK_UI_W)*sizeof(uint16_t));
         if(s->view.key==400){button(native,8,6,76,28,"TANKS",2,true);button(native,8,90,76,20,"HISTORY",1,true);}
+        else if(s->view.key==200)button(native,8,4,76,32,"CLOCK",2,true);
         else text(native,6,10,2,0xa9e2dd,s->view.title);
         button(native,8,40,76,48,"UP",3,s->scroll>0);
         button(native,8,112,76,48,"DOWN",3,s->scroll<UI349_SCROLL_MAX);

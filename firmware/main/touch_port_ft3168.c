@@ -28,6 +28,9 @@
 #include "board_waveshare_349_v1.h"
 #include "viewport_349_v1.h"
 #include "ui_349_v1.h"
+#include "rtc_port.h"
+#include "clock_edit.h"
+#include <time.h>
 #else
 #include "esp_lcd_touch_ft5x06.h"
 #include "esp_lcd_touch_cst816s.h"
@@ -37,6 +40,7 @@
 #include "esp_log.h"
 #include "driver/i2c_master.h"
 #include <math.h>
+#include <string.h>
 
 static const char *TAG = "touch";
 #ifndef CONFIG_POCKET_TANK_WAVESHARE_349_V1
@@ -155,6 +159,30 @@ void touch_port_poll(tank_t *t) {
         s_down=false; /* captured rails/scrolls must never release as content taps */
         if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
 #ifdef POCKET_WORLD_PROTO
+        if(action>=UI349_CLOCK&&action<UI349_CLOCK_FIELD+6){
+            ui349_state_t *u=&g_ui349;
+            if(action==UI349_CLOCK){
+                time_t now=time(NULL);struct tm tm;gmtime_r(&now,&tm);
+                u->clock_valid=rtc_port_time_trusted();
+                int v[]={tm.tm_year+1900,tm.tm_mon+1,tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec};
+                if(!u->clock_valid){int initial[]={2026,1,1,0,0,0};memcpy(v,initial,sizeof v);}
+                memcpy(u->clock_fields,v,sizeof v);u->clock_field=0;u->clock_picker=true;
+            }else if(action==UI349_CLOCK_CANCEL)u->clock_picker=false;
+            else if(action>=UI349_CLOCK_FIELD)u->clock_field=action-UI349_CLOCK_FIELD;
+            else if(action==UI349_CLOCK_PLUS||action==UI349_CLOCK_MINUS){
+                static const int low[]={2024,1,1,0,0,0},high[]={2099,12,31,23,59,59};int f=u->clock_field;
+                int n=u->clock_fields[f]+(action==UI349_CLOCK_PLUS?1:-1);
+                if(n<low[f])n=high[f];
+                if(n>high[f])n=low[f];
+                u->clock_fields[f]=n;
+            }else if(action==UI349_CLOCK_SAVE){int64_t epoch;
+                if(!clock_edit_epoch(u->clock_fields,&epoch))ui349_message("INVALID DATE / CHECK FIELDS");
+                else if(!rtc_port_set_utc(epoch))ui349_message("CLOCK NOT SAVED / CHECK USB LOG");
+                else{u->clock_picker=false;ui349_message("UTC SAVED / NO TIME CATCH-UP");}
+            }
+            return;
+        }
+        if(g_ui349.clock_picker)return;
         if(action==UI349_HISTORY){g_ui349.history_picker=true;return;}
         if(action==UI349_HISTORY_BACK){g_ui349.history_picker=false;return;}
         if(g_ui349.history_picker)return;

@@ -26,6 +26,8 @@
 #include "ui_349_v1.h"
 #endif
 #include "esp_timer.h"
+#include "rtc_port.h"
+#include <errno.h>
 #include "nvs.h"
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
 #include "driver/usb_serial_jtag.h"
@@ -200,6 +202,14 @@ static void run(tank_t *t, char *line) {
     const char *c = argv[0];
     if (!strcmp(c, "help")) help();
     else if (!strcmp(c, "state")) show_state(t);
+    else if (!strcmp(c,"clock")) {
+        if(argc==1)rtc_port_diagnose();
+        else if(argc==3&&!strcmp(argv[1],"set")){
+            char *end;errno=0;long long epoch=strtoll(argv[2],&end,10);
+            bool ok=!errno&&*argv[2]&&!*end&&rtc_port_set_utc(epoch);
+            ESP_LOGI(TAG,"clock set %s",ok?"OK":"FAILED");rtc_port_diagnose();
+        }else ESP_LOGI(TAG,"clock | clock set <UTC Unix seconds>");
+    }
     else if (!strcmp(c, "hungry")) {
         int n = argc > 1 ? atoi(argv[1]) : t->n_fish;
         float lvl = argc > 2 ? atof(argv[2]) : 9.0f;
