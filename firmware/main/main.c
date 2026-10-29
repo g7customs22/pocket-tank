@@ -45,6 +45,7 @@
 #include "version.h"
 #include "rtc_port.h"
 #include "time_recovery.h"
+#include "weather_client.h"
 #include "driver/i2c_master.h"
 #include "esp_async_memcpy.h"
 #include "freertos/semphr.h"
@@ -602,6 +603,11 @@ static void tank_task(void *arg) {
         director_poll(&tank);
         time_recovery_poll();
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        ambient_port_poll(&g_ui349.ambient,now);
+        ambient_idle(&g_ui349.ambient,now,g_ui349.last_interaction_us,
+            !g_ui349.view.key&&!g_ui349.owner&&!tank.ui_cover&&!setup_active()&&!notice_current()&&!g_ui349.positioning);
+#endif
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
         touch_port_poll(&tank); /* serial/save work must not share a blind span with rendering */
 #endif
         int ans = touch_port_confirm_take();
@@ -974,7 +980,11 @@ void app_main(void) {
     g_ui349.can_undo=slot_system_has_undo();
     g_ui349.slot_error=slot_system_blocked();
 #endif
-    time_recovery_init(); /* After slot restore: unknown absence gets no credit. */
+    time_recovery_init();
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    ambient_port_init(&g_ui349.ambient);
+    g_ui349.last_interaction_us=esp_timer_get_time();
+#endif /* After slot restore: unknown absence gets no credit. */
     notice_sync(&tank);                      /* what is already earned stays unannounced */
     { uint32_t r = progression_loaded_release();   /* which release wrote the tank we just loaded */
       if (r) ESP_LOGI(TAG, "the save was written by v%d.%d.%d", (int)(r >> 16), (int)(r >> 8 & 255), (int)(r & 255));

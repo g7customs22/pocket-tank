@@ -2,6 +2,7 @@
 #ifndef UI_349_V1_H
 #define UI_349_V1_H
 #include "tank.h"
+#include "ambient.h"
 #ifdef POCKET_WORLD_PROTO
 #include "world_proto.h"
 #endif
@@ -48,6 +49,7 @@ typedef struct {
     int copy_item,copy_selected,copy_depth;
     int center_result; /* 0 instruction, 1 success, -1 invalid/stale sample */
 #endif
+    ambient_t ambient;
     ui349_battery_t battery;
     ui349_view_t view;
     int camera_x, camera_y;

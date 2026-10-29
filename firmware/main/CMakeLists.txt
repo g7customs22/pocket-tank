@@ -1,4 +1,4 @@
-set(SRCS main.c director.c brightness.c batlog.c codec_port.c advisor_llm_esp.c imu_port_qmi8658.c time_recovery.c)
+set(SRCS main.c director.c brightness.c batlog.c codec_port.c advisor_llm_esp.c imu_port_qmi8658.c time_recovery.c weather_client.c)
 if(CONFIG_POCKET_TANK_WAVESHARE_349_V1)
     list(APPEND SRCS board_waveshare_349_v1.c battery_port_349_v1.c display_port_axs15231b.c ui_349_v1.c)
 else()
@@ -24,7 +24,7 @@ endif()
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS "."
-    REQUIRES tankcore llm esp_partition spi_flash esp_timer esp_driver_spi esp_driver_i2c esp_driver_i2s esp_driver_gpio esp_driver_usb_serial_jtag esp_lcd nvs_flash esp_app_format esp_driver_ledc esp_adc esp_wifi esp_event esp_netif lwip
+    REQUIRES tankcore llm esp_partition spi_flash esp_timer esp_driver_spi esp_driver_i2c esp_driver_i2s esp_driver_gpio esp_driver_usb_serial_jtag esp_lcd nvs_flash esp_app_format esp_driver_ledc esp_adc esp_wifi esp_event esp_netif lwip esp_http_client mbedtls json
     EMBED_FILES "tokenizer.bin" "../../assets/sounds/sounds.bin"
 )
 

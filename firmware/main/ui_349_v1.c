@@ -97,10 +97,10 @@ void ui349_configure(ui349_state_t *s, ui349_view_t view) {
     bool changed = s->view.key != view.key;
     if (changed) s->scroll = clamp(view.initial_scroll, 0, UI349_SCROLL_MAX);
     s->view = view;
-    if (changed) { s->history_picker=false; s->clock_picker=false; s->positioning = can_position(s); s->species_picker=false; s->habitat_picker=false; }
+    if (changed) { s->ambient.editor=false; s->ambient.active=false; s->history_picker=false; s->clock_picker=false; s->positioning = can_position(s); s->species_picker=false; s->habitat_picker=false; }
 }
 bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
-    if(s->clock_picker || s->history_picker || s->species_picker || s->habitat_picker || s->slots_picker
+    if(s->ambient.editor || s->clock_picker || s->history_picker || s->species_picker || s->habitat_picker || s->slots_picker
 #ifdef POCKET_WORLD_PROTO
        ||s->copy_picker
 #endif
@@ -125,6 +125,14 @@ bool ui349_map(const ui349_state_t *s, int x, int y, int *tx, int *ty) {
 }
 /* Hit targets match the rectangles drawn below; rails never feed tank gestures. */
 static int rail_hit(const ui349_state_t *s, int x, int y) {
+    if(s->ambient.editor){
+        if(x>=552&&x<632){if(y>=8&&y<60)return AMBIENT_CANCEL;if(y>=110&&y<164)return AMBIENT_SAVE;}
+        if(x>=20&&x<240&&y>=38&&y<90)return AMBIENT_TIMEOUT;
+        if(x>=264&&x<534&&y>=38&&y<90)return AMBIENT_DIGIT+(x-264)/54;
+        if(y>=104&&y<150){if(x>=284&&x<380)return AMBIENT_MINUS;if(x>=424&&x<520)return AMBIENT_PLUS;}
+        return UI349_CONSUMED;
+    }
+    if(s->view.key==200&&!s->clock_picker&&!s->history_picker&&x>=8&&x<84&&y>=90&&y<110)return AMBIENT_OPEN;
     if(s->clock_picker){
         if(x>=552&&x<632){if(y>=8&&y<60)return UI349_CLOCK_CANCEL;if(y>=110&&y<164)return UI349_CLOCK_SAVE;}
         if(y>=42&&y<96&&x>=12&&x<540)return UI349_CLOCK_FIELD+(x-12)/88;
@@ -208,6 +216,7 @@ static int rail_hit(const ui349_state_t *s, int x, int y) {
 }
 int ui349_input(ui349_state_t *s, bool down, int x, int y, bool *content_down, int *tx, int *ty) {
     *content_down = false;
+    if(s->ambient.editor){*tx=*ty=0;if(down&&!s->owner)s->owner=2,s->pressed=rail_hit(s,x,y),s->press_key=s->view.key,s->press_x=x,s->press_y=y,s->rail_moved=false;}
 #ifdef POCKET_WORLD_PROTO
     s->world_camera.frozen=down;
 #endif
@@ -273,6 +282,18 @@ static void button(uint16_t *fb, int x, int y, int w, int h, const char *label, 
     text(fb,x+(w-tw)/2,y+(h-7*scale)/2,scale,enabled ? 0xf2ffff : 0x66838a,label);
 }
 static void ui349_render_body(const ui349_state_t *s, const tank_t *t, const uint16_t *source, uint16_t *native) {
+    if(s->ambient.editor){
+        const ambient_t *a=&s->ambient;char b[32];rect(native,0,0,640,172,0x0b2029);
+        text(native,20,10,2,0xf2ffff,"SCREENSAVER");text(native,264,10,2,0xf2ffff,"WEATHER ZIP");
+        unsigned seconds=ambient_seconds(a->draft.timeout);
+        if(seconds)snprintf(b,sizeof b,"%u MIN",seconds/60);else strcpy(b,"OFF");
+        button(native,20,38,220,52,b,3,true);
+        for(int i=0;i<5;i++){b[0]=a->draft.zip[i];b[1]=0;button(native,264+i*54,38,48,52,b,3,true);if(i==a->digit)rect(native,264+i*54,88,48,3,0xffd080);}
+        text(native,20,104,1,0xa9e2dd,"TAP TIMEOUT TO CHANGE");text(native,20,123,1,0xa9e2dd,"12 HOUR / FAHRENHEIT");
+        button(native,284,104,96,46,"-",3,true);button(native,424,104,96,46,"+",3,true);
+        button(native,552,8,80,52,"CANCEL",1,true);button(native,552,110,80,54,"SAVE",2,true);
+        text(native,20,158,1,0xa9e2dd,a->save_error?"NOT SAVED / TRY AGAIN":"WEATHER: OPEN-METEO / ZIP: ZIPPOPOTAM.US");return;
+    }
     if(s->clock_picker){
         static const char *labels[]={"YEAR","MONTH","DAY","HOUR","MIN","SEC"};
         rect(native,0,0,640,172,0x0b2029);text(native,12,8,2,0xf2ffff,"SET DATE AND TIME / UTC");
@@ -367,7 +388,7 @@ static void ui349_render_body(const ui349_state_t *s, const tank_t *t, const uin
         for (int y=0; y<UI349_H; y++)
             memcpy(native+y*UI349_W+UI349_PAGE_X,source+(y+s->scroll)*TANK_W,(fish_view(s) ? FISH_VIEW_X-UI349_PAGE_X : TANK_UI_W)*sizeof(uint16_t));
         if(s->view.key==400){button(native,8,6,76,28,"TANKS",2,true);button(native,8,90,76,20,"HISTORY",1,true);}
-        else if(s->view.key==200)button(native,8,4,76,32,"CLOCK",2,true);
+        else if(s->view.key==200){button(native,8,4,76,32,"CLOCK",2,true);button(native,8,90,76,20,"SAVER",1,true);}
         else text(native,6,10,2,0xa9e2dd,s->view.title);
         button(native,8,40,76,48,"UP",3,s->scroll>0);
         button(native,8,112,76,48,"DOWN",3,s->scroll<UI349_SCROLL_MAX);
@@ -462,7 +483,34 @@ static void ui349_render_body(const ui349_state_t *s, const tank_t *t, const uin
 }
 
 void ui349_message(const char *message){snprintf(g_ui349.feedback,sizeof g_ui349.feedback,"%s",message);g_ui349.feedback_s=3;}
+static void bubble(uint16_t *fb,int x,int y){
+    for(int dy=-5;dy<=5;dy++)for(int dx=-5;dx<=5;dx++){
+        int r=dx*dx+dy*dy;if(r<=25&&x+dx>=0&&x+dx<640&&y+dy>=0&&y+dy<172){
+            unsigned rgb=r>=16?0x9de9f1:0x387888;
+            if(dx<=-1&&dy<=-1&&r<=13)rgb=0xe9ffff;
+            fb[(y+dy)*640+x+dx]=color(rgb);
+        }
+    }
+}
+static void ambient_overlay(const ambient_t *a,uint16_t *fb){
+    for(int i=0;i<640*172;i++)fb[i]=(uint16_t)((fb[i]&0xf7de)>>1);
+    char clock[8];if(a->clock_valid)snprintf(clock,sizeof clock,"%2d:%02d",a->hour,a->minute);else strcpy(clock,"--:--");
+    for(int n=0;n<5;n++){const uint8_t *g=glyph(clock[n]);if(!g)continue;
+        for(int r=0;r<7;r++)for(int c=0;c<5;c++)if(g[r]&(16>>c))bubble(fb,148+n*66+c*11,25+r*11);
+    }
+    text(fb,482,79,2,0xe9ffff,a->clock_valid?(a->pm?"PM":"AM"):"SET TIME");
+    char b[80];if(a->weather_valid)snprintf(b,sizeof b,"%d F / %s%s",a->temperature,ambient_condition(a->code),a->stale?" / STALE":"");
+    else snprintf(b,sizeof b,"%s",a->loading?"UPDATING WEATHER":"WEATHER UNAVAILABLE");
+    text(fb,(640-(int)strlen(b)*12)/2,111,2,0xf2ffff,b);
+    snprintf(b,sizeof b,"%.31s%s%s",a->place,a->place[0]?" / ":"ZIP ",a->config.zip);
+    text(fb,(640-(int)strlen(b)*6)/2,135,1,0xa9e2dd,b);
+    text(fb,8,158,1,0xa9e2dd,"OPEN-METEO");text(fb,248,158,1,0xa9e2dd,"TAP TO RETURN");
+}
 void ui349_render(const ui349_state_t *s,const tank_t *t,const uint16_t *source,uint16_t *native){
+    if(s->ambient.active&&!s->view.key&&!s->ambient.editor){
+        ui349_state_t clean=*s;clean.controls_hidden=true;
+        ui349_render_body(&clean,t,source,native);ambient_overlay(&s->ambient,native);return;
+    }
     ui349_render_body(s,t,source,native);
     if(s->feedback_s>0){rect(native,168,148,304,22,0x04141a);text(native,180,155,1,0xf2ffff,s->feedback);}
 }
