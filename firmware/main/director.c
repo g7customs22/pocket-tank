@@ -27,6 +27,7 @@
 #endif
 #include "esp_timer.h"
 #include "rtc_port.h"
+#include "time_recovery.h"
 #include <errno.h>
 #include "nvs.h"
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
@@ -87,7 +88,8 @@ static int stage_of(const char *s) {
     return -1;
 }
 static bool s_ok;
-static char s_line[96];
+static char s_line[256];
+static bool s_overflow;
 static int  s_len;
 
 static int find_fish(const tank_t *t, const char *s) {
@@ -204,6 +206,18 @@ static void run(tank_t *t, char *line) {
     else if (!strcmp(c, "state")) show_state(t);
     else if (!strcmp(c,"clock")) {
         if(argc==1)rtc_port_diagnose();
+        else if(argc==2&&!strcmp(argv[1],"invalidate")){
+            time_recovery_stop();
+            bool ok=rtc_port_invalidate();
+            ESP_LOGI(TAG,"clock invalidate %s",ok?"OK":"FAILED");rtc_port_diagnose();
+        }
+        else if(argc==2&&!strcmp(argv[1],"network"))time_recovery_status();
+        else if(argc==2&&!strcmp(argv[1],"sync"))time_recovery_sync();
+        else if(argc==2&&!strcmp(argv[1],"retry"))time_recovery_retry();
+        else if(argc==4&&!strcmp(argv[1],"wifi")){
+            bool ok=time_recovery_configure(argv[2],argv[3]);
+            ESP_LOGI(TAG,"clock Wi-Fi setup %s",ok?"OK":"FAILED");
+        }
         else if(argc==3&&!strcmp(argv[1],"set")){
             char *end;errno=0;long long epoch=strtoll(argv[2],&end,10);
             bool ok=!errno&&*argv[2]&&!*end&&rtc_port_set_utc(epoch);
@@ -502,9 +516,10 @@ void director_poll(tank_t *t) {
         for (int i = 0; i < n; i++) {
             char ch = (char)buf[i];
             if (ch == '\n' || ch == '\r') {
-                if (s_len) { s_line[s_len] = 0; run(t, s_line); }
-                s_len = 0;
+                if (s_len && !s_overflow) { s_line[s_len] = 0; run(t, s_line); }
+                memset(s_line,0,sizeof s_line);s_len = 0;s_overflow=false;
             } else if (s_len < (int)sizeof s_line - 1) s_line[s_len++] = ch;
+            else s_overflow=true;
         }
     }
 #else

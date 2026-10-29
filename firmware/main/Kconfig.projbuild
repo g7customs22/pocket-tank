@@ -6,6 +6,13 @@ menu "pocket-tank"
             V1 only: AXS15231B, reset GPIO21, backlight GPIO8.
             Fits the unchanged 448x368 tank into a 209x172 viewport.
             Battery percentage is unavailable; IMU auto-flip awaits calibration.
+    config POCKET_TANK_WIFI_TIME_RECOVERY
+        bool "Recover an invalid RTC over configured Wi-Fi"
+        depends on POCKET_TANK_WAVESHARE_349_V1 && ESP_WIFI_ENABLED
+        default y
+        help
+            One bounded attempt after clock loss. No unknown offline credit.
+            Credentials are configured over USB and stored separately from tanks.
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         depends on !POCKET_TANK_WAVESHARE_349_V1

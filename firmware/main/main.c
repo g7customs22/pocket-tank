@@ -44,6 +44,7 @@
 #include "esp_app_desc.h"
 #include "version.h"
 #include "rtc_port.h"
+#include "time_recovery.h"
 #include "driver/i2c_master.h"
 #include "esp_async_memcpy.h"
 #include "freertos/semphr.h"
@@ -202,6 +203,7 @@ static int restore_fish(void) {
     return n;
 }
 static void enter_sleep_for(int wake_after_s) {
+    time_recovery_stop();
     game_clock_account(&s_game_clock,esp_timer_get_time());
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
     boot349_capture_enable(false);
@@ -318,6 +320,7 @@ void device_sleep(int wake_after_s) { enter_sleep_for(wake_after_s); }   /* dire
 /* the PWR key held 1.5 s: save and cut NOW, no grace (the same power-off the
  * grace ends in). No PMIC: deep sleep. */
 static void enter_poweroff(void) {
+    time_recovery_stop();
     ESP_LOGI(TAG, "power-off now: saving tank, PMIC soft cut (the PWR key boots)");
     touch_port_confirm_answer(-1);
     if (!progression_save(&tank))               /* never cancels (see enter_sleep_for) */
@@ -597,6 +600,7 @@ static void tank_task(void *arg) {
         }
 #endif
         director_poll(&tank);
+        time_recovery_poll();
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
         touch_port_poll(&tank); /* serial/save work must not share a blind span with rendering */
 #endif
@@ -888,7 +892,11 @@ void app_main(void) {
     /* stats card cache: redrawn 4x/s, blitted otherwise. Internal SRAM if it
        fits (a PSRAM->PSRAM copy of the 56 KB sprite cost 3.3 ms per frame,
        more than the draw it replaced) */
-    uint16_t *card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint16_t *card = NULL;
+#if !CONFIG_POCKET_TANK_WIFI_TIME_RECOVERY
+    card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#endif
+    /* Recovery needs internal RAM for radio tasks and DMA; the card is CPU-only. */
     if (!card) card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (card) render_set_card_cache(card);
     ESP_LOGI(TAG, "card cache %s", !card ? "none" : esp_ptr_external_ram(card) ? "PSRAM" : "internal SRAM");
@@ -966,6 +974,7 @@ void app_main(void) {
     g_ui349.can_undo=slot_system_has_undo();
     g_ui349.slot_error=slot_system_blocked();
 #endif
+    time_recovery_init(); /* After slot restore: unknown absence gets no credit. */
     notice_sync(&tank);                      /* what is already earned stays unannounced */
     { uint32_t r = progression_loaded_release();   /* which release wrote the tank we just loaded */
       if (r) ESP_LOGI(TAG, "the save was written by v%d.%d.%d", (int)(r >> 16), (int)(r >> 8 & 255), (int)(r & 255));

@@ -100,3 +100,20 @@ bool rtc_port_set_utc(int64_t epoch) {
     return true;
 #endif
 }
+
+/* Exercise invalid-calendar recovery without removing power or changing tank data.
+ * Year 2000 is outside the accepted range. Keep oscillator/control bits intact. */
+bool rtc_port_invalidate(void) {
+#ifndef POCKET_TANK_WIDE_V1
+    return false;
+#else
+    if(!s_dev)return false;
+    bool was_trusted=s_trusted;s_trusted=false;
+    if(!slot_system_save()){s_trusted=was_trusted;return false;}
+    uint8_t w[2]={10,0},reg=10,year=255;
+    bool ok=i2c_master_transmit(s_dev,w,sizeof w,100)==ESP_OK &&
+        i2c_master_transmit_receive(s_dev,&reg,1,&year,1,100)==ESP_OK && year==0;
+    ESP_LOGW(TAG,"test invalidation %s; unknown baseline saved; offline care disabled",ok?"complete":"failed");
+    return ok;
+#endif
+}
