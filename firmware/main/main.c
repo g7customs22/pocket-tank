@@ -892,7 +892,11 @@ void app_main(void) {
     /* stats card cache: redrawn 4x/s, blitted otherwise. Internal SRAM if it
        fits (a PSRAM->PSRAM copy of the 56 KB sprite cost 3.3 ms per frame,
        more than the draw it replaced) */
-    uint16_t *card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint16_t *card = NULL;
+#if !CONFIG_POCKET_TANK_WIFI_TIME_RECOVERY
+    card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#endif
+    /* Recovery needs internal RAM for radio tasks and DMA; the card is CPU-only. */
     if (!card) card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (card) render_set_card_cache(card);
     ESP_LOGI(TAG, "card cache %s", !card ? "none" : esp_ptr_external_ram(card) ? "PSRAM" : "internal SRAM");

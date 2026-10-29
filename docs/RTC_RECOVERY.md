@@ -25,7 +25,7 @@ Run `python firmware/host_test/configure-time-wifi.py` on the connected PC. It c
 
 Credentials are stored in a separate `time_wifi` NVS namespace on the device, not in source or aquarium records. The existing firmware configuration does not encrypt NVS. Wi-Fi uses RAM configuration so the driver does not create another persistent credential copy. The console does not echo the setup command; its buffer is cleared after processing and overlong commands are discarded.
 
-`clock network` reports configured/valid/active flags without revealing network details. `clock retry` requests one new attempt only if time is invalid. `clock` reports RTC validity. Existing manual clock setting remains available if the network is unavailable.
+`clock network` reports configured/valid/active flags without revealing network details. `clock retry` requests one new attempt only if time is invalid. `clock sync` explicitly requests one bounded sync even with valid time, for USB commissioning. It uses the same safe clock transaction. Memory free/largest/minimum readings are logged around the attempt. `clock` reports RTC validity. Existing manual clock setting remains available if the network is unavailable.
 
 ## Verification
 
@@ -39,3 +39,13 @@ Sources:
 - https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-3.49/ESP32-S3-Touch-LCD-3.49-Schematic.pdf
 - https://www.nxp.com/docs/en/data-sheet/PCF85063A.pdf (oscillator-stop behavior)
 - ESP-IDF 5.4.2 `components/lwip/include/apps/esp_sntp.h` documents overriding `sntp_sync_time`.
+
+## Authorized hardware commissioning, 2026-10-29
+
+SOURCE_CONFIRMED: App-only installation and exact readback passed on COM23 / 10:20:BA:3D:2F:FC. Before restart, all aquarium journal/rescue/meta/undo bytes, NVS, partition table and bootloader matched the fresh backup. The model partition was outside the write range. Credentials were provisioned privately over USB and survived the second app-only installation and timed sleep.
+
+The first live Wi-Fi attempt failed to create its task with only 18,923 internal bytes free. The CPU-only 63,984-byte card cache now uses existing PSRAM when recovery is enabled, reserving internal memory for networking. The corrected build connected, received a time sample, committed the RTC through the safe setter and stopped Wi-Fi. Measurements: 84,479 bytes before; 47,931 at sample, largest block 38,912; minimum reported 45,571; 75,051 after radio shutdown. External RAM remained about 2.1 MB free. Display logs settled at 4.6-4.8 fps; this does not establish physical UI acceptance or card-open performance.
+
+The hardware test used explicit `clock sync` with already-valid time. Automatic invalid-clock recovery and network-failure paths have host coverage; actual total-power-loss boot recovery and six-hour physical sleep remain NEEDS_VERIFICATION. The final build retained valid time/configuration through a 15-second timed sleep; USB enumerated later than the fixed reconnect deadline, then follow-up diagnostics passed. An initial pre-correction startup hit a touch I2C NACK and rebooted; the corrected build started cleanly.
+
+Installed application SHA-256: 3e33f9455343eb87141b21bd6c0f5a0a9add409c09971dd5336e37d64b853f5a. Build version text is the cached 2d02f7d-dirty label; binary readback hash is the installation identity.

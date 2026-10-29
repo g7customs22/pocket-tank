@@ -55,6 +55,10 @@ int main(void){
  fresh();connect_ip();tv.tv_sec=1800000000;set_ok=false;sntp_sync_time(&tv);time_recovery_poll();assert(rtc_calls==1&&!trusted&&!active&&!wifi_ready);
  for(int i=1;i<=13;i++){fresh();fail_at=i;time_recovery_init();time_recovery_poll();assert(!active&&!wifi_ready&&!station&&!rtc_calls);}
  puts("PASS timeout, disconnect, sleep cancellation, manual correction, stale/bad time, RTC failure and every startup failure stop radio without retries or clock changes");
+ fresh();trusted=true;time_recovery_sync();time_recovery_poll();assert(active);
+ event(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,NULL);time_recovery_poll();sntp_sync_time(&tv);time_recovery_poll();assert(rtc_calls==1&&trusted&&!active&&!explicit_sync);time_recovery_poll();assert(radio_starts==1);
+ fresh();trusted=true;time_recovery_sync();time_recovery_poll();tick+=45000000;time_recovery_poll();assert(trusted&&!active&&!rtc_calls&&!explicit_sync);
+ puts("PASS explicit valid-clock sync and timeout preserve bounded behavior");
  fresh();commit_ok=false;assert(!time_recovery_configure("74657374","3132333435363738"));assert(!requested&&!rtc_calls);
  fresh();assert(time_recovery_configure("74657374","3132333435363738"));assert(requested&&nvs_writes==1);time_recovery_poll();assert(active);time_recovery_stop();
  fresh();memset(saved.password,'x',sizeof saved.password);time_recovery_init();time_recovery_poll();assert(!active&&!radio_starts);

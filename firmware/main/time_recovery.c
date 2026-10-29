@@ -10,6 +10,7 @@
 #include "esp_sntp.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include <sys/time.h>
@@ -18,6 +19,13 @@ static const char *TAG="time-recovery";
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static bool active,got_ip,disconnected,accept_sample;
 static int64_t sample_epoch,sample_us;
+static bool explicit_sync;
+static void memory(const char *phase) {
+    ESP_LOGI(TAG,"memory %s internal_free=%u largest=%u minimum=%u",phase,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+}
 static bool requested,network_ready,wifi_ready,sntp_started;
 static int64_t started_us;
 static esp_netif_t *station;
@@ -46,14 +54,16 @@ static void event(void *arg,esp_event_base_t base,int32_t id,void *data) {
 }
 void time_recovery_stop(void) {
     portENTER_CRITICAL(&lock);active=false;accept_sample=false;got_ip=false;disconnected=false;sample_epoch=0;portEXIT_CRITICAL(&lock);
-    requested=false;
+    requested=false;explicit_sync=false;
     if(sntp_started){esp_sntp_stop();sntp_started=false;}
     if(wifi_ready){esp_wifi_stop();esp_wifi_deinit();wifi_ready=false;}
     if(ip_registered){esp_event_handler_instance_unregister(IP_EVENT,IP_EVENT_STA_GOT_IP,ip_handler);ip_registered=false;}
     if(wifi_registered){esp_event_handler_instance_unregister(WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,wifi_handler);wifi_registered=false;}
     if(station){esp_netif_destroy_default_wifi(station);station=NULL;}
 }
+void time_recovery_sync(void){time_recovery_stop();explicit_sync=true;requested=true;}
 static void start(void) {
+    memory("before");
     requested=false;time_wifi_credentials_t c;
     if(!load(&c)){wipe(&c,sizeof c);ESP_LOGW(TAG,"clock invalid; Wi-Fi setup required or set clock manually");return;}
     bool ok=true;
@@ -78,12 +88,12 @@ static void start(void) {
     portENTER_CRITICAL(&lock);active=ok;portEXIT_CRITICAL(&lock);
     if(ok)ok=esp_wifi_start()==ESP_OK&&esp_wifi_connect()==ESP_OK;
     if(!ok){time_recovery_stop();ESP_LOGW(TAG,"connection could not start; clock unchanged");}
-    else ESP_LOGI(TAG,"one time-recovery attempt started (45-second limit)");
+    else {memory("connected-start");ESP_LOGI(TAG,"one time-recovery attempt started (45-second limit)");}
 }
 void time_recovery_init(void){requested=!rtc_port_time_trusted();}
 void time_recovery_retry(void){time_recovery_stop();requested=!rtc_port_time_trusted();}
 void time_recovery_poll(void) {
-    if(rtc_port_time_trusted()){if(wifi_ready||requested)time_recovery_stop();return;}
+    if(rtc_port_time_trusted()&&!explicit_sync){if(wifi_ready||requested)time_recovery_stop();return;}
     if(requested)start();
     portENTER_CRITICAL(&lock);bool running=active,ip=got_ip,lost=disconnected;int64_t epoch=sample_epoch,stamp=sample_us;portEXIT_CRITICAL(&lock);
     if(!running)return;
@@ -95,7 +105,9 @@ void time_recovery_poll(void) {
         esp_sntp_init();sntp_started=true;
     }
     if(epoch){
+        memory("sample");
         bool valid=time_sample_valid(epoch,stamp,now);time_recovery_stop();
+        memory("radio-off");
         /* RTC and aquarium writes happen ONLY here, on the tank task. The
          * setter rebases the selected slot before/after setting time; other
          * slots retain their data and rebase when selected. No catch-up. */
@@ -119,6 +131,7 @@ void time_recovery_init(void){}
 void time_recovery_poll(void){}
 void time_recovery_stop(void){}
 void time_recovery_retry(void){}
+void time_recovery_sync(void){}
 void time_recovery_status(void){}
 bool time_recovery_configure(const char *s,const char *p){(void)s;(void)p;return false;}
 #endif

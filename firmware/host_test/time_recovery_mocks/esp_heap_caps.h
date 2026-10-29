@@ -1,0 +1,2 @@
+#define MALLOC_CAP_INTERNAL 1
+#define MALLOC_CAP_8BIT 2
