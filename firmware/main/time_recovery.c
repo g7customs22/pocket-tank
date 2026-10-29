@@ -2,6 +2,7 @@
 #include "sdkconfig.h"
 #if CONFIG_POCKET_TANK_WIFI_TIME_RECOVERY
 #include "time_recovery_policy.h"
+#include "weather_client.h"
 #include "rtc_port.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -19,7 +20,7 @@ static const char *TAG="time-recovery";
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static bool active,got_ip,disconnected,accept_sample;
 static int64_t sample_epoch,sample_us;
-static bool explicit_sync;
+static bool explicit_sync,weather_mode,weather_started;
 static void memory(const char *phase) {
     ESP_LOGI(TAG,"memory %s internal_free=%u largest=%u minimum=%u",phase,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
@@ -54,6 +55,7 @@ static void event(void *arg,esp_event_base_t base,int32_t id,void *data) {
 }
 void time_recovery_stop(void) {
     portENTER_CRITICAL(&lock);active=false;accept_sample=false;got_ip=false;disconnected=false;sample_epoch=0;portEXIT_CRITICAL(&lock);
+    weather_client_stop();weather_mode=weather_started=false;
     requested=false;explicit_sync=false;
     if(sntp_started){esp_sntp_stop();sntp_started=false;}
     if(wifi_ready){esp_wifi_stop();esp_wifi_deinit();wifi_ready=false;}
@@ -62,10 +64,14 @@ void time_recovery_stop(void) {
     if(station){esp_netif_destroy_default_wifi(station);station=NULL;}
 }
 void time_recovery_sync(void){time_recovery_stop();explicit_sync=true;requested=true;}
+bool time_recovery_weather(void){
+    if(wifi_ready||requested||!rtc_port_time_trusted())return false;
+    weather_mode=true;requested=true;return true;
+}
 static void start(void) {
     memory("before");
     requested=false;time_wifi_credentials_t c;
-    if(!load(&c)){wipe(&c,sizeof c);ESP_LOGW(TAG,"clock invalid; Wi-Fi setup required or set clock manually");return;}
+    if(!load(&c)){wipe(&c,sizeof c);time_recovery_stop();ESP_LOGW(TAG,"clock invalid; Wi-Fi setup required or set clock manually");return;}
     bool ok=true;
     if(!network_ready){ok=esp_netif_init()==ESP_OK;
         if(ok){esp_err_t e=esp_event_loop_create_default();ok=e==ESP_OK||e==ESP_ERR_INVALID_STATE;}
@@ -93,12 +99,18 @@ static void start(void) {
 void time_recovery_init(void){requested=!rtc_port_time_trusted();}
 void time_recovery_retry(void){time_recovery_stop();requested=!rtc_port_time_trusted();}
 void time_recovery_poll(void) {
-    if(rtc_port_time_trusted()&&!explicit_sync){if(wifi_ready||requested)time_recovery_stop();return;}
+    if(rtc_port_time_trusted()&&!explicit_sync&&!weather_mode){if(wifi_ready||requested)time_recovery_stop();return;}
     if(requested)start();
     portENTER_CRITICAL(&lock);bool running=active,ip=got_ip,lost=disconnected;int64_t epoch=sample_epoch,stamp=sample_us;portEXIT_CRITICAL(&lock);
     if(!running)return;
     int64_t now=esp_timer_get_time();
     if(lost||now-started_us>=45000000){time_recovery_stop();ESP_LOGW(TAG,"time recovery unavailable; clock unchanged, Wi-Fi off");return;}
+    if(weather_mode){
+        if(!rtc_port_time_trusted()){time_recovery_stop();requested=true;return;}
+        if(ip&&!weather_started){weather_started=weather_client_begin();if(!weather_started){time_recovery_stop();return;}}
+        if(weather_started&&weather_client_poll()!=0)time_recovery_stop();
+        return;
+    }
     if(ip&&!sntp_started){
         esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);esp_sntp_setservername(0,"time.cloudflare.com");
         portENTER_CRITICAL(&lock);accept_sample=true;portEXIT_CRITICAL(&lock);
@@ -132,6 +144,7 @@ void time_recovery_poll(void){}
 void time_recovery_stop(void){}
 void time_recovery_retry(void){}
 void time_recovery_sync(void){}
+bool time_recovery_weather(void){return false;}
 void time_recovery_status(void){}
 bool time_recovery_configure(const char *s,const char *p){(void)s;(void)p;return false;}
 #endif

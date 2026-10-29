@@ -144,6 +144,7 @@ void touch_port_poll(tank_t *t) {
     if(touch_err!=ESP_OK)return;
     ui349_contact(&contact, now, &touched, &raw_x, &raw_y);
     if(touched)g_ui349.last_interaction_us=now;
+    if(ambient_contact(&g_ui349.ambient,touched)){s_down=false;return;}
     /* Automatic lights-out: the first whole contact only wakes the tank. */
     if(ui349_wake_filter(&g_ui349,touched,!g_ui349.owner&&!s_down&&t->night&&t->light_auto)){
         tank_handled(t);s_down=false;return;
@@ -159,6 +160,8 @@ void touch_port_poll(tank_t *t) {
         s_down=false; /* captured rails/scrolls must never release as content taps */
         if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
 #ifdef POCKET_WORLD_PROTO
+        if(action>=AMBIENT_OPEN&&action<AMBIENT_DIGIT+5){ambient_action(&g_ui349.ambient,action);return;}
+        if(g_ui349.ambient.editor)return;
         if(action>=UI349_CLOCK&&action<UI349_CLOCK_FIELD+6){
             ui349_state_t *u=&g_ui349;
             if(action==UI349_CLOCK){

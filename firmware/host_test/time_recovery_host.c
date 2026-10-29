@@ -6,7 +6,11 @@ static int64_t tick,committed_epoch,system_epoch;
 static bool trusted,configured,commit_ok,set_ok;
 static int radio_starts,radio_stops,rtc_calls,sntp_starts,nvs_writes,fail_at,calls;
 static time_wifi_credentials_t saved;
-static int net;
+static int net,weather_result,weather_begins;
+bool weather_client_begin(void){weather_begins++;return true;}
+int weather_client_poll(void){return weather_result;}
+void weather_client_stop(void){}
+
 static int step(void){return ++calls==fail_at?-1:0;}
 int64_t esp_timer_get_time(void){return tick;}
 bool rtc_port_time_trusted(void){return trusted;}
@@ -59,6 +63,11 @@ int main(void){
  event(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,NULL);time_recovery_poll();sntp_sync_time(&tv);time_recovery_poll();assert(rtc_calls==1&&trusted&&!active&&!explicit_sync);time_recovery_poll();assert(radio_starts==1);
  fresh();trusted=true;time_recovery_sync();time_recovery_poll();tick+=45000000;time_recovery_poll();assert(trusted&&!active&&!rtc_calls&&!explicit_sync);
  puts("PASS explicit valid-clock sync and timeout preserve bounded behavior");
+ fresh();trusted=true;weather_result=0;weather_begins=0;assert(time_recovery_weather());time_recovery_poll();assert(active&&!sntp_started);
+ event(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,NULL);time_recovery_poll();assert(weather_begins==1&&!sntp_started&&!rtc_calls);
+ weather_result=1;time_recovery_poll();assert(!active&&!weather_mode&&!rtc_calls);
+ fresh();assert(!time_recovery_weather());trusted=true;assert(time_recovery_weather());time_recovery_poll();trusted=false;time_recovery_poll();assert(requested&&!weather_mode&&!active);
+ puts("PASS weather shares radio, never sets clock, shuts down and yields to invalid-clock recovery");
  fresh();commit_ok=false;assert(!time_recovery_configure("74657374","3132333435363738"));assert(!requested&&!rtc_calls);
  fresh();assert(time_recovery_configure("74657374","3132333435363738"));assert(requested&&nvs_writes==1);time_recovery_poll();assert(active);time_recovery_stop();
  fresh();memset(saved.password,'x',sizeof saved.password);time_recovery_init();time_recovery_poll();assert(!active&&!radio_starts);
