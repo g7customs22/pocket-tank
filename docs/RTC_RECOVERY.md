@@ -49,3 +49,13 @@ The first live Wi-Fi attempt failed to create its task with only 18,923 internal
 The hardware test used explicit `clock sync` with already-valid time. Automatic invalid-clock recovery and network-failure paths have host coverage; actual total-power-loss boot recovery and six-hour physical sleep remain NEEDS_VERIFICATION. The final build retained valid time/configuration through a 15-second timed sleep; USB enumerated later than the fixed reconnect deadline, then follow-up diagnostics passed. An initial pre-correction startup hit a touch I2C NACK and rebooted; the corrected build started cleanly.
 
 Installed application SHA-256: 3e33f9455343eb87141b21bd6c0f5a0a9add409c09971dd5336e37d64b853f5a. Build version text is the cached 2d02f7d-dirty label; binary readback hash is the installation identity.
+
+## Physical invalid-calendar test, 2026-10-29
+
+SOURCE_CONFIRMED: The user requested deliberate invalid time followed by sync. Added USB-only `clock invalidate`: commit an unknown save timestamp before writing RTC year 2000, preserve oscillator/control bits and leave offline time untrusted. A failed save prevents the hardware write; a failed hardware write leaves time untrusted. Production RTC tests cover invalidation, boot rejection, subsequent recovery, absent device, failed save and failed write.
+
+After fresh backup and application-only flash/readback, aquarium journal/rescue/meta/undo and NVS/bootloader/partition bytes were unchanged. The live command reported raw year 00, trusted=0, valid=0, clock_valid=0. `clock retry` then connected, accepted network time and committed current UTC in about nine seconds. Final diagnostics: trusted=1, OS=0, STOP=0, valid=1; configured=1, attempt_active=0. Balance 1672 and lifetime earned 2952 were unchanged across the test, and the transaction reported no offline catch-up. Memory at sample: 47,907 internal bytes free, largest 38,912, minimum 45,627; after shutdown 74,999 free. The network-corrected clock agreed with host UTC within the measurement window.
+
+This physically verifies recovery from an invalid RTC calendar via retry. Automatic invalid-clock boot triggering and actual oscillator-stop after power depletion are separate scenarios, not established by this test. No power depletion was induced. All existing work remains preserved.
+
+Current installed binary SHA-256: 0fa4ab15295c1113016cc77f638cfb61a8c94108215b075b54125dc0e05fd536 (1,786,688 bytes). This supersedes the earlier installed hash above.

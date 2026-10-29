@@ -5,7 +5,7 @@
 static struct tm *compat_gmtime(const time_t *t,struct tm *out){return gmtime_s(out,t)?NULL:out;}
 #define gmtime_r compat_gmtime
 #include "../components/tankcore/rtc_port_pcf85063.c"
-static uint8_t regs[11];static int writes,saves,fail_write,fail_save;static time_t sysnow;static int64_t stamps[3];static bool stopped;
+static uint8_t regs[11];static int writes,saves,fail_write,fail_save;static time_t sysnow;static int64_t stamps[4];static bool stopped;
 int i2c_master_bus_add_device(void*b,const i2c_device_config_t*c,void**d){*d=(void*)1;return 0;}
 int i2c_master_transmit_receive(void*d,const uint8_t*r,size_t n,uint8_t*out,size_t z,int ms){memcpy(out,regs+*r,z);return 0;}
 int i2c_master_transmit(void*d,const uint8_t*w,size_t n,int ms){writes++;if(writes==fail_write){regs[4]=0x80;return -1;}memcpy(regs+*w,w+1,n-1);return 0;}
@@ -26,6 +26,14 @@ int main(void){
  fresh();regs[0]=9;assert(rtc_port_set_utc(1800000000)&&regs[0]==1&&s_trusted);
  fresh();regs[0]=8;fail_write=2;memcpy(original,regs,11);assert(!rtc_port_set_utc(1800000000)&&!memcmp(regs,original,11)&&!s_trusted);
  fresh();regs[0]=32;assert(!rtc_port_set_utc(1800000000)&&writes==0&&saves==0);
+ fresh();sysnow=1800000000;s_trusted=true;regs[4]=0;regs[0]=1;
+ assert(rtc_port_invalidate()&&!s_trusted&&stamps[0]==0&&regs[10]==0&&regs[0]==1&&sysnow==1800000000);
+ time_t invalid;assert(!rtc_read(&invalid));assert(!rtc_port_init((void*)1));
+ assert(rtc_port_set_utc(1800000000)&&s_trusted&&stamps[1]==0&&stamps[2]==1800000001);
+ fresh();s_trusted=true;fail_save=1;assert(!rtc_port_invalidate()&&s_trusted&&writes==0);
+ fresh();s_trusted=true;fail_write=1;assert(!rtc_port_invalidate()&&!s_trusted&&stamps[0]==0);
+ fresh();s_dev=NULL;assert(!rtc_port_invalidate()&&saves==0&&writes==0);
+ puts("PASS diagnostic invalidation, zero baseline, rejected boot, recovery and failure safety");
  fresh();assert(!rtc_port_set_utc(1)&&writes==0);puts("PASS production RTC forward/backward sync, zero baseline, restart, invalid dates, stopped clock, write rollback and save failures");return 0;
 }
 

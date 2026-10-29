@@ -206,6 +206,11 @@ static void run(tank_t *t, char *line) {
     else if (!strcmp(c, "state")) show_state(t);
     else if (!strcmp(c,"clock")) {
         if(argc==1)rtc_port_diagnose();
+        else if(argc==2&&!strcmp(argv[1],"invalidate")){
+            time_recovery_stop();
+            bool ok=rtc_port_invalidate();
+            ESP_LOGI(TAG,"clock invalidate %s",ok?"OK":"FAILED");rtc_port_diagnose();
+        }
         else if(argc==2&&!strcmp(argv[1],"network"))time_recovery_status();
         else if(argc==2&&!strcmp(argv[1],"sync"))time_recovery_sync();
         else if(argc==2&&!strcmp(argv[1],"retry"))time_recovery_retry();

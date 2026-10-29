@@ -8,4 +8,6 @@ bool rtc_port_init(i2c_master_bus_handle_t bus);
 bool rtc_port_time_trusted(void);
 void rtc_port_diagnose(void);
 bool rtc_port_set_utc(int64_t epoch);
+/* Explicit USB diagnostic only; commits an unknown baseline before invalidation. */
+bool rtc_port_invalidate(void);
 #endif
