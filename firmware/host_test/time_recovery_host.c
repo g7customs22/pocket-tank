@@ -6,6 +6,8 @@ static int64_t tick,committed_epoch,system_epoch;
 static bool trusted,configured,commit_ok,set_ok;
 static int radio_starts,radio_stops,rtc_calls,sntp_starts,nvs_writes,fail_at,calls;
 static time_wifi_credentials_t saved;
+static int64_t saved_check;
+static int schedule_writes;
 static int net,weather_result,weather_begins;
 bool weather_client_begin(void){weather_begins++;return true;}
 int weather_client_poll(void){return weather_result;}
@@ -13,6 +15,7 @@ void weather_client_stop(void){}
 
 static int step(void){return ++calls==fail_at?-1:0;}
 int64_t esp_timer_get_time(void){return tick;}
+int gettimeofday(struct timeval *tv,void *unused){(void)unused;tv->tv_sec=system_epoch;tv->tv_usec=0;return 0;}
 bool rtc_port_time_trusted(void){return trusted;}
 bool rtc_port_set_utc(int64_t epoch){rtc_calls++;committed_epoch=epoch;if(set_ok){trusted=true;system_epoch=epoch;}return set_ok;}
 esp_err_t esp_netif_init(void){return step();}
@@ -36,17 +39,17 @@ void esp_sntp_init(void){sntp_starts++;}
 void esp_sntp_setoperatingmode(int v){assert(v==ESP_SNTP_OPMODE_POLL);}
 void esp_sntp_setservername(unsigned char i,const char*s){assert(i==0&&!strcmp(s,"time.cloudflare.com"));}
 esp_err_t nvs_open(const char*s,int mode,int*h){assert(!strcmp(s,"time_wifi"));*h=1;return 0;}
-esp_err_t nvs_get_blob(int h,const char*k,void*out,size_t*n){assert(!strcmp(k,"credentials"));if(!configured)return -1;assert(*n==sizeof saved);memcpy(out,&saved,sizeof saved);return 0;}
-esp_err_t nvs_set_blob(int h,const char*k,const void*in,size_t n){assert(!strcmp(k,"credentials")&&n==sizeof saved);memcpy(&saved,in,n);nvs_writes++;return 0;}
+esp_err_t nvs_get_blob(int h,const char*k,void*out,size_t*n){if(!strcmp(k,"last_check")){memcpy(out,&saved_check,sizeof saved_check);*n=sizeof saved_check;return saved_check?0:-1;}assert(!strcmp(k,"credentials"));if(!configured)return -1;assert(*n==sizeof saved);memcpy(out,&saved,sizeof saved);return 0;}
+esp_err_t nvs_set_blob(int h,const char*k,const void*in,size_t n){if(!strcmp(k,"last_check")){assert(n==sizeof saved_check);if(commit_ok)memcpy(&saved_check,in,n);schedule_writes++;return 0;}assert(!strcmp(k,"credentials")&&n==sizeof saved);memcpy(&saved,in,n);nvs_writes++;return 0;}
 esp_err_t nvs_commit(int h){if(commit_ok)configured=true;return commit_ok?0:-1;}
 void nvs_close(int h){}
-static void fresh(void){time_recovery_stop();network_ready=false;trusted=false;configured=true;commit_ok=set_ok=true;tick=1000;system_epoch=0;radio_starts=radio_stops=rtc_calls=sntp_starts=nvs_writes=fail_at=calls=0;strcpy(saved.ssid,"test-network");strcpy(saved.password,"test-password");}
+static void fresh(void){time_recovery_stop();network_ready=false;trusted=false;configured=true;commit_ok=set_ok=true;tick=1000;system_epoch=0;saved_check=0;schedule_writes=0;next_check_us=INT64_MAX;radio_starts=radio_stops=rtc_calls=sntp_starts=nvs_writes=fail_at=calls=0;strcpy(saved.ssid,"test-network");strcpy(saved.password,"test-password");}
 static void connect_ip(void){time_recovery_init();time_recovery_poll();assert(active);event(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,NULL);time_recovery_poll();assert(sntp_started);}
 int main(void){
  time_wifi_credentials_t c;assert(time_credentials_decode("74657374","3132333435363738",&c));assert(!strcmp(c.ssid,"test")&&!strcmp(c.password,"12345678"));
  assert(!time_credentials_decode("00","3132333435363738",&c));assert(!time_credentials_decode("xyz","3132333435363738",&c));assert(!time_credentials_decode("74","31",&c));
  char maxssid[65],maxpass[127];memset(maxssid,'4',64);maxssid[64]=0;memset(maxpass,'4',126);maxpass[126]=0;assert(time_credentials_decode(maxssid,maxpass,&c));
- fresh();trusted=true;time_recovery_init();time_recovery_poll();assert(!radio_starts&&!rtc_calls);
+ fresh();trusted=true;system_epoch=saved_check=1800000000;time_recovery_init();time_recovery_poll();assert(!radio_starts&&!rtc_calls);
  fresh();configured=false;time_recovery_init();time_recovery_poll();time_recovery_poll();assert(!radio_starts&&!rtc_calls);
  fresh();connect_ip();struct timeval tv={.tv_sec=1800000000,.tv_usec=0};sntp_sync_time(&tv);assert(system_epoch==0&&!rtc_calls&&!trusted);tick+=2000000;time_recovery_poll();assert(rtc_calls==1&&committed_epoch==1800000002&&trusted&&!wifi_ready&&!active&&radio_stops==1);
  sntp_sync_time(&tv);time_recovery_poll();assert(rtc_calls==1);puts("PASS callback cannot change time; only tank-task transaction commits; late callback ignored; radio off");
@@ -71,6 +74,21 @@ int main(void){
  fresh();commit_ok=false;assert(!time_recovery_configure("74657374","3132333435363738"));assert(!requested&&!rtc_calls);
  fresh();assert(time_recovery_configure("74657374","3132333435363738"));assert(requested&&nvs_writes==1);time_recovery_poll();assert(active);time_recovery_stop();
  fresh();memset(saved.password,'x',sizeof saved.password);time_recovery_init();time_recovery_poll();assert(!active&&!radio_starts);
+ fresh();trusted=true;system_epoch=saved_check=1800000000;time_recovery_init();
+ tick+=43200000000LL-1;time_recovery_poll();assert(!active&&!radio_starts);
+ tick++;time_recovery_poll();assert(active&&explicit_sync&&radio_starts==1);
+ event(NULL,IP_EVENT,IP_EVENT_STA_GOT_IP,NULL);time_recovery_poll();tv.tv_sec=1800043200;sntp_sync_time(&tv);time_recovery_poll();assert(rtc_calls==1&&saved_check==1800043200&&!active);
+ tick+=43200000000LL-1;time_recovery_poll();assert(radio_starts==1);tick++;time_recovery_poll();assert(radio_starts==2);
+ tick+=45000000;time_recovery_poll();assert(!active);time_recovery_poll();assert(radio_starts==2);
+ fresh();trusted=true;system_epoch=1800040000;saved_check=1800000000;time_recovery_init();assert(next_check_us-tick==3200000000LL);
+ tick+=3200000000LL;time_recovery_poll();assert(active);time_recovery_stop();time_recovery_poll();assert(!active);
+ fresh();trusted=true;system_epoch=1800100000;saved_check=1800000000;time_recovery_init();time_recovery_poll();assert(active);
+ fresh();trusted=true;system_epoch=1800000000;saved_check=1800000001;time_recovery_init();time_recovery_poll();assert(active);
+ fresh();trusted=true;system_epoch=1800000000;time_recovery_init();time_recovery_poll();assert(active);
+ fresh();trusted=true;system_epoch=1800000000;saved_check=1800000000;time_recovery_init();assert(time_recovery_weather());time_recovery_poll();tick+=43200000000LL;time_recovery_poll();assert(!active);time_recovery_poll();assert(active&&!weather_mode);
+ fresh();trusted=true;system_epoch=1800000000;commit_ok=false;time_recovery_init();time_recovery_poll();assert(active&&!saved_check&&next_check_us>tick);time_recovery_stop();time_recovery_poll();assert(!active);
+ fresh();connect_ip();tick+=45000000;time_recovery_poll();assert(!active&&!trusted);tick=next_check_us;time_recovery_poll();assert(active&&radio_starts==2);
+ puts("PASS exact 12h boundary, successful correction, failure/cancel throttling, sleep/restart remaining interval, overdue/backward-clock boot, weather priority and schedule-save failure");
  assert(!time_sample_valid(4102444800LL,0,0));assert(!time_sample_valid(1800000000,10,9));
  puts("PASS credential bounds, corrupt storage, failed credential commit and separate NVS namespace; no aquarium write API used by recovery controller");return 0;
 }

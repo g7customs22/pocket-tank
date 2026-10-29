@@ -28,7 +28,22 @@ static void memory(const char *phase) {
         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
 }
 static bool requested,network_ready,wifi_ready,sntp_started;
-static int64_t started_us;
+static int64_t started_us,next_check_us;
+#define CLOCK_CHECK_SECONDS 43200LL
+static int64_t utc_now(void){struct timeval tv;return gettimeofday(&tv,NULL)==0?(int64_t)tv.tv_sec:0;}
+/* A device-only schedule: never stored in or inferred from an aquarium slot. */
+static void remember_check(void){
+    int64_t epoch=utc_now();nvs_handle_t h;
+    next_check_us=esp_timer_get_time()+CLOCK_CHECK_SECONDS*1000000;
+    if(!rtc_port_time_trusted()||!time_sample_valid(epoch,0,0))return;
+    if(nvs_open("time_wifi",NVS_READWRITE,&h)==ESP_OK){
+        esp_err_t e=nvs_set_blob(h,"last_check",&epoch,sizeof epoch);
+        if(e==ESP_OK)e=nvs_commit(h);
+        nvs_close(h);
+        if(e!=ESP_OK)ESP_LOGW(TAG,"check schedule not persisted; current session remains bounded");
+    }
+}
+
 static esp_netif_t *station;
 static esp_event_handler_instance_t wifi_handler,ip_handler;
 static bool wifi_registered,ip_registered;
@@ -71,7 +86,8 @@ bool time_recovery_weather(void){
 static void start(void) {
     memory("before");
     requested=false;time_wifi_credentials_t c;
-    if(!load(&c)){wipe(&c,sizeof c);time_recovery_stop();ESP_LOGW(TAG,"clock invalid; Wi-Fi setup required or set clock manually");return;}
+    if(!weather_mode)remember_check();
+    if(!load(&c)){wipe(&c,sizeof c);time_recovery_stop();ESP_LOGW(TAG,"Wi-Fi setup required for network time");return;}
     bool ok=true;
     if(!network_ready){ok=esp_netif_init()==ESP_OK;
         if(ok){esp_err_t e=esp_event_loop_create_default();ok=e==ESP_OK||e==ESP_ERR_INVALID_STATE;}
@@ -96,9 +112,23 @@ static void start(void) {
     if(!ok){time_recovery_stop();ESP_LOGW(TAG,"connection could not start; clock unchanged");}
     else {memory("connected-start");ESP_LOGI(TAG,"one time-recovery attempt started (45-second limit)");}
 }
-void time_recovery_init(void){requested=!rtc_port_time_trusted();}
+void time_recovery_init(void){
+    requested=!rtc_port_time_trusted();
+    int64_t now=utc_now(),last=0,remaining=0;nvs_handle_t h;
+    if(nvs_open("time_wifi",NVS_READONLY,&h)==ESP_OK){
+        size_t n=sizeof last;
+        if(nvs_get_blob(h,"last_check",&last,&n)!=ESP_OK||n!=sizeof last)last=0;
+        nvs_close(h);
+    }
+    if(time_sample_valid(last,0,0)&&now>=last&&now-last<CLOCK_CHECK_SECONDS)
+        remaining=CLOCK_CHECK_SECONDS-(now-last);
+    next_check_us=esp_timer_get_time()+remaining*1000000;
+}
 void time_recovery_retry(void){time_recovery_stop();requested=!rtc_port_time_trusted();}
 void time_recovery_poll(void) {
+    if(!wifi_ready&&!requested&&esp_timer_get_time()>=next_check_us){
+        ESP_LOGI(TAG,"scheduled 12-hour clock check");time_recovery_sync();
+    }
     if(rtc_port_time_trusted()&&!explicit_sync&&!weather_mode){if(wifi_ready||requested)time_recovery_stop();return;}
     if(requested)start();
     portENTER_CRITICAL(&lock);bool running=active,ip=got_ip,lost=disconnected;int64_t epoch=sample_epoch,stamp=sample_us;portEXIT_CRITICAL(&lock);
@@ -118,12 +148,15 @@ void time_recovery_poll(void) {
     }
     if(epoch){
         memory("sample");
-        bool valid=time_sample_valid(epoch,stamp,now);time_recovery_stop();
+        bool valid=time_sample_valid(epoch,stamp,now);
+        if(valid&&rtc_port_time_trusted())ESP_LOGI(TAG,"network clock difference=%lld seconds",(long long)(epoch+(now-stamp)/1000000-utc_now()));
+        time_recovery_stop();
         memory("radio-off");
         /* RTC and aquarium writes happen ONLY here, on the tank task. The
          * setter rebases the selected slot before/after setting time; other
          * slots retain their data and rebase when selected. No catch-up. */
         bool ok=valid&&rtc_port_set_utc(epoch+(now-stamp)/1000000);
+        if(ok)remember_check();
         ESP_LOGI(TAG,"time recovery %s; Wi-Fi off; no offline catch-up",ok?"complete":"failed");
     }
 }
