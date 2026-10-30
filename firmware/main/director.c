@@ -24,6 +24,7 @@
 #include "notice.h"
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 #include "ui_349_v1.h"
+#include "board_waveshare_349_v1.h"
 #endif
 #include "esp_timer.h"
 #include "rtc_port.h"
@@ -190,6 +191,9 @@ static void help(void) {
     ESP_LOGI(TAG, "battery <pct> [charging|full|plugged]|real (a STAGED gauge: on battery at pct - the card's pill, and at 10 or less the low-battery notice + cue + the pill that stays - or on the cable: the bolt, the sweep while charging, the pill for a few seconds; not saved) | battery page [off] (the battery page, as a tap on the pill opens it) | battery (its numbers) | snd battery (just the notice + cue)");
     ESP_LOGI(TAG, "kbd [wheel|grid|pages] (the name page's design: the wheel, or one of the two rejected keyboards of 09-13 - not saved, a boot is the wheel)");
     ESP_LOGI(TAG, "touch [bias <px>] (finger-landing correction: reported touches move up by px; not saved)");
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+    ESP_LOGI(TAG, "touch trace <seconds> (raw contacts, max 120 seconds / 256 records; 0 stops)");
+#endif
     ESP_LOGI(TAG, "pmic (AXP2101 dump) | pmic on|off <aldo1|aldo2..4|bldo1|bldo2|cpusldo|dcdc2..5|dldo1|dldo2> (experiments; boot trims the unused ones) | pmic trim");
     ESP_LOGI(TAG, "bright <0-255> (panel now; not saved) | level 100|60|30 (the keeper's setting, saved)");
     ESP_LOGI(TAG, "batlog [clear] (the tank's own battery log: SoC/VBAT every 5 min awake, 30 min asleep, mA derived - read it after a night on battery) | codec (ES8311 registers) | deepsleep [N] (N: 5 s grace then deep sleep with an N s timer wake - one batlog window per N, BOOT wakes it; no N: the keeper's sleep, grace then power-off) | poweroff (save + PMIC cut now) | keytime [N] (N s of timing every PWR press - is a tap under the PMIC's 128 ms power-on hold?)");
@@ -420,6 +424,13 @@ static void run(tank_t *t, char *line) {
         ESP_LOGI(TAG, "name page: %s", setup_keyboard() == SETUP_KBD_GRID ? "GRID (the first cut: 7 x 4 keys on a panel)" :
                  setup_keyboard() == SETUP_KBD_PAGES ? "PAGES (the second: half the alphabet, big keys)" : "the letter wheel");
     } else if (!strcmp(c, "touch")) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        if (argc > 2 && !strcmp(argv[1], "trace")) {
+            int seconds = atoi(argv[2]);
+            board_349_v1_touch_trace(seconds > 0 ? (unsigned)seconds : 0);
+            return;
+        }
+#endif
         if (argc > 2 && !strcmp(argv[1], "bias")) touch_port_set_bias(atoi(argv[2]));
         ESP_LOGI(TAG, "touch bias %d px (reported y - %d)", touch_port_bias(), touch_port_bias());
     } else if (!strcmp(c, "name") && argc > 2) {
