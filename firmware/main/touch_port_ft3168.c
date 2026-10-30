@@ -43,6 +43,13 @@
 #include <string.h>
 
 static const char *TAG = "touch";
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+/* Input edges, not simulation cadence, delimit a physical stroke. */
+static void end_stroke(tank_t *t){
+    t->drag_active=t->drag_has_prev=t->hold_active=false;t->drag_dist=0;
+    t->slash_armed=t->slash_engaged=t->slash_cut=false;t->slash_h=t->slash_v=0;
+}
+#endif
 #ifndef CONFIG_POCKET_TANK_WAVESHARE_349_V1
 static esp_lcd_touch_handle_t s_tp;
 #endif
@@ -143,11 +150,12 @@ void touch_port_poll(tank_t *t) {
     }
     if(touch_err!=ESP_OK)return;
     ui349_contact(&contact, now, &touched, &raw_x, &raw_y);
+    if(!touched)end_stroke(t);
     if(touched)g_ui349.last_interaction_us=now;
-    if(ambient_contact(&g_ui349.ambient,touched)){s_down=false;return;}
+    if(ambient_contact(&g_ui349.ambient,touched)){end_stroke(t);s_down=false;return;}
     /* Automatic lights-out: the first whole contact only wakes the tank. */
     if(ui349_wake_filter(&g_ui349,touched,!g_ui349.owner&&!s_down&&t->night&&t->light_auto)){
-        tank_handled(t);s_down=false;return;
+        end_stroke(t);tank_handled(t);s_down=false;return;
     }
     int mapped_x, mapped_y;
     int ux = raw_x, uy = raw_y;
@@ -157,6 +165,7 @@ void touch_port_poll(tank_t *t) {
     #endif
     int action = ui349_input(&g_ui349, touched, ux, uy, &touched, &mapped_x, &mapped_y);
     if (action != UI349_PASS) {
+        end_stroke(t);
         s_down=false; /* captured rails/scrolls must never release as content taps */
         if(action!=UI349_CONSUMED) ESP_LOGI(TAG,"navigation action=%d at %d,%d",action,ux,uy);
 #ifdef POCKET_WORLD_PROTO
@@ -266,6 +275,9 @@ void touch_port_poll(tank_t *t) {
 #endif
     if (touched && ty < 0) ty = 0;
     if (touched && !s_down) {
+#ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
+        end_stroke(t);
+#endif
         audio_port_prewarm();                   /* the release's cue plays warm */
         s_press_us = now; s_px = tx; s_py = ty;
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
@@ -306,7 +318,12 @@ void touch_port_poll(tank_t *t) {
     clean=ui349_clean_view(&g_ui349) && !su && !s_cf;
 #endif
     bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat;      /* a page or a prompt owns the glass */
-    if (touched) { s_lx = tx; s_ly = ty; if (!modal) {
+    bool world_gesture=!modal;
+#ifdef POCKET_WORLD_PROTO
+    /* A feeding contact and a displayed page cannot be scissors or a hold-to-edit. */
+    world_gesture=world_gesture&&s_press_world&&!g_ui349.positioning&&s_sel<0&&!ui349_feed_zone(s_press_screen_y,true);
+#endif
+    if (touched) { s_lx = tx; s_ly = ty; if (world_gesture) {
 #ifdef POCKET_WORLD_PROTO
         if(s_press_world&&!g_ui349.positioning){float mx,my,gx,gy;wp_origin(&g_ui349.world_camera,1,&mx,&my);wp_origin(&g_ui349.world_camera,2,&gx,&gy);tank_touch_drag_layers(t,tx,ty,gx-mx,gy-my);}
         else
@@ -314,7 +331,7 @@ void touch_port_poll(tank_t *t) {
         tank_touch_drag(t, tx, ty);
     } }  /* stroke = wipe/slash */
 #ifdef CONFIG_POCKET_TANK_WAVESHARE_349_V1
-    if (touched && !modal && t->slash_engaged) s_trimmed = true;
+    if (touched && world_gesture && t->slash_engaged) s_trimmed = true;
 #endif
     /* tap-and-hold on a decoration (2026-09-24, Strato: "right now it's like 5
        taps to get back to the edit"): a still finger 700 ms on an owned
@@ -323,7 +340,7 @@ void touch_port_poll(tank_t *t) {
 #ifdef POCKET_WORLD_PROTO
     if(s_press_world&&!g_ui349.positioning){gesture_scale_x=wp_units_x(&g_ui349.world_camera);gesture_scale_y=wp_units_y(&g_ui349.world_camera);}
 #endif
-    if (touched && !modal && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24*gesture_scale_x && fabsf(ty - s_py) < 24*gesture_scale_y) {
+    if (touched && world_gesture && !s_held_page && now - s_press_us > 700000 && fabsf(tx - s_px) < 24*gesture_scale_x && fabsf(ty - s_py) < 24*gesture_scale_y) {
 #ifdef POCKET_WORLD_PROTO
         if(s_press_world&&!g_ui349.positioning){float sx,sy;wp_project(&g_ui349.world_camera,1,s_px,s_py,&sx,&sy);int id=wp_hit(&g_ui349.world_camera,&t->world,sx,sy,g_ui349.copy_selected);
             if(id>=2){g_ui349.copy_selected=id;for(int i=0;i<WP_COPIES;i++)if(t->world.saved.copy[i].id==id){g_ui349.copy_item=t->world.saved.copy[i].item;g_ui349.copy_depth=t->world.saved.copy[i].depth;}
@@ -336,7 +353,7 @@ void touch_port_poll(tank_t *t) {
         if (it >= 0) { setup_begin_place(t, it); s_held_page = true; s_sel = -1;
                        ESP_LOGI(TAG, "held on the %s: placement page up", SD_ITEMS[it].name); }
     }
-    if (touched && !modal && !s_held_page && now - s_press_us > 300000 && fabsf(ty - s_py) < 30*gesture_scale_y) tank_touch_hold(t, tx, ty);
+    if (touched && world_gesture && !s_held_page && now - s_press_us > 300000 && fabsf(ty - s_py) < 30*gesture_scale_y) tank_touch_hold(t, tx, ty);
     if (!touched && s_down) {
         /* release: classify with the LAST touched position (the old code fell
            back to the PRESS position here, so dx/dy were always 0 - every
