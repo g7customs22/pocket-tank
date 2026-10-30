@@ -91,8 +91,11 @@ esp_err_t board_349_v1_init(void) {
 }
 esp_err_t board_349_v1_touch(bool *down, uint16_t *x, uint16_t *y) {
     static const uint8_t command[11] = {0xb5, 0xab, 0xa5, 0x5a, 0, 0, 0, 0x0e, 0, 0, 0};
-    uint8_t data[32];
-    esp_err_t err = i2c_master_transmit_receive(s_touch, command, sizeof command, data, sizeof data, 20);
+    /* Match the 0x0e response length requested above (two contact records). */
+    uint8_t data[14];
+    /* The AXS driver sends a STOP after the command before reading its reply. */
+    esp_err_t err = i2c_master_transmit(s_touch, command, sizeof command, 20);
+    if (err == ESP_OK) err = i2c_master_receive(s_touch, data, sizeof data, 20);
     trace_touch(err, data);
     if (err != ESP_OK) return err; /* Do not turn a bus error into a release/tap. */
     static bool first = true;
