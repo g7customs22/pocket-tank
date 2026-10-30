@@ -1,6 +1,7 @@
 #include "board_waveshare_349_v1.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -10,6 +11,46 @@ static i2c_master_bus_handle_t s_bus, s_touch_bus;
 static i2c_master_dev_handle_t s_expander, s_touch;
 static SemaphoreHandle_t s_lock;
 static uint8_t s_outputs;
+/* Console and polling run on the tank task. Disabled unless explicitly armed. */
+static int64_t s_trace_until, s_trace_last;
+static unsigned s_trace_lines;
+static bool s_trace_down;
+
+void board_349_v1_touch_trace(unsigned seconds) {
+    if (seconds > 120) seconds = 120;
+    s_trace_until = seconds ? esp_timer_get_time() + (int64_t)seconds * 1000000 : 0;
+    s_trace_last = 0;
+    s_trace_lines = 0;
+    s_trace_down = false;
+    ESP_LOGI("touchraw", "capture %u seconds (maximum 256 records)", seconds);
+}
+
+static void trace_touch(esp_err_t err, const uint8_t *data) {
+    if (!s_trace_until) return;
+    int64_t now = esp_timer_get_time();
+    if (now >= s_trace_until || s_trace_lines >= 256) {
+        s_trace_until = 0;
+        ESP_LOGI("touchraw", "capture ended: %u records", s_trace_lines);
+        return;
+    }
+    if (err != ESP_OK) {
+        if (now - s_trace_last >= 100000) {
+            ESP_LOGI("touchraw", "us=%lld read error=%d", (long long)now, (int)err);
+            s_trace_last = now;
+            ++s_trace_lines;
+        }
+        return; /* Failed reads have no valid packet and do not imply release. */
+    }
+    bool down = data[1] > 0 && data[1] < 5;
+    if (down != s_trace_down || (down && now - s_trace_last >= 100000)) {
+        ESP_LOGI("touchraw", "us=%lld down=%d packet=%02x %02x %02x %02x %02x %02x x=%u y=%u",
+                 (long long)now, down, data[0], data[1], data[2], data[3], data[4], data[5],
+                 ((data[2] & 15) << 8) | data[3], ((data[4] & 15) << 8) | data[5]);
+        s_trace_last = now;
+        ++s_trace_lines;
+    }
+    s_trace_down = down;
+}
 
 i2c_master_bus_handle_t board_i2c_bus(void) { return s_bus; }
 static esp_err_t reg_write(uint8_t reg, uint8_t value) {
@@ -52,6 +93,7 @@ esp_err_t board_349_v1_touch(bool *down, uint16_t *x, uint16_t *y) {
     static const uint8_t command[11] = {0xb5, 0xab, 0xa5, 0x5a, 0, 0, 0, 0x0e, 0, 0, 0};
     uint8_t data[32];
     esp_err_t err = i2c_master_transmit_receive(s_touch, command, sizeof command, data, sizeof data, 20);
+    trace_touch(err, data);
     if (err != ESP_OK) return err; /* Do not turn a bus error into a release/tap. */
     static bool first = true;
     if (first) {

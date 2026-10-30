@@ -21,5 +21,6 @@ esp_err_t board_349_v1_init(void);
 i2c_master_bus_handle_t board_i2c_bus(void);
 esp_err_t board_349_v1_output(uint8_t mask, bool high);
 esp_err_t board_349_v1_touch(bool *down, uint16_t *x, uint16_t *y);
+void board_349_v1_touch_trace(unsigned seconds);
 void board_349_v1_wait_key_release(void);
 #endif
