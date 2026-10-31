@@ -1301,10 +1301,25 @@ void tank_scatter_food(tank_t *t, int n) {
 #define SLEEP_HUNGER_PER_H 0.8f    /* fed -> ravenous over ~7 h of sleep */
 #define SLEEP_ENERGY_PER_H 2.0f
 #define SLEEP_STRESS_PER_H 2.0f
+/* This is a phase/behavior clock, not fish age or wall time. Keep its float
+ * spacing well below a 1/30-second tick, including after loading older saves.
+ * Shift visit timestamps too: their order and elapsed ages must not change.
+ * No saved fields or layout changes; a rollover only changes animation phase. */
+static void tank_advance_clock(tank_t *t, float seconds) {
+    double next = (double)t->clock + seconds;
+    if (next >= 32768.0) {
+        double shift = floor(next / 16384.0) * 16384.0;
+        for (int i = 0; i < t->n_fish; i++)
+            for (int z = 0; z < 6; z++)
+                t->fish[i].zone_seen[z] = (float)((double)t->fish[i].zone_seen[z] - shift);
+        next -= shift;
+    }
+    t->clock = (float)next;
+}
 void tank_tick_sleep(tank_t *t, float seconds) {
     if (seconds <= 0) return;
     float h = seconds / 3600.0f;
-    t->clock += seconds;
+    tank_advance_clock(t, seconds);
     for (int i = 0; i < t->n_fish; i++) {
         fish_t *f = &t->fish[i];
         f->hunger = clampf(f->hunger + SLEEP_HUNGER_PER_H * h, 0, 10);
@@ -1873,7 +1888,7 @@ static void pleco_glass(tank_t *t,int idx,float dt,float old_x,float old_y) {
     f->x=clampf(f->x,margin,TANK_W-margin); f->y=clampf(f->y,margin,TANK_H-margin);
 }
 void tank_tick(tank_t *t, float dt, advisor_fn advise) {
-    t->clock += dt;
+    tank_advance_clock(t, dt);
     /* the light: on while the device is handled, off LIGHT_IDLE_S after the
      * last touch or movement (tank_handled) - a tank left on the desk goes
      * dark and the fish sleep. A setup page or a prompt holds it on; the

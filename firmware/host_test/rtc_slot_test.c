@@ -69,7 +69,9 @@ int main(void){
   if(legacy_mode)progression_wake(&t,wall);else assert(slot_system_boot(&t)==1);
   float expected=(i==1||i==3)?(float)jumps[i]:0;
   assert(fabsf(progression_age_s(&t,0)-(10000+expected*.25f))<.1f);
-  assert(fabsf(t.clock-(before_clock+expected))<1);
+  float phase=before_clock+expected;
+  if(expected>0 && phase>=32768)phase=fmodf(phase,16384);
+  assert(fabsf(t.clock-phase)<1); /* Animation phase wraps; credited age above does not. */
  }
  for(int path=0;path<2;path++) {
   legacy_mode=path==1;wall=0;progression_set_age(&t,0,10000);
