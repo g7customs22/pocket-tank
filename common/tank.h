@@ -292,7 +292,7 @@ typedef struct tank {
     bubble_t bubble[MAX_BUBBLE];
     float    bubble_x, bubble_y;   /* bubble column anchor */
     float    reef_x, reef_y;
-    float    clock;                /* seconds since start */
+    float    clock;                /* bounded animation/behavior phase; not age or wall time */
     bool     night;                /* the tank light is off: fish rest, the palette dims */
     float    idle_s;               /* seconds since the device was last HANDLED - moved
                                     * (IMU) or touched. The light goes off once this
